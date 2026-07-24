@@ -1,0 +1,135 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "field:phone_number_id",
+ "creation": "2026-07-24 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "whatsapp_account",
+  "phone_number_id",
+  "waba_id",
+  "display_phone_number",
+  "company",
+  "internal_shared_secret",
+  "status",
+  "column_break_1",
+  "onboarded_by",
+  "onboarded_on",
+  "onboarding_section",
+  "onboarding_source",
+  "business_id",
+  "embedded_signup_token"
+ ],
+ "fields": [
+  {
+   "description": "Name of the linked frappe_whatsapp \"WhatsApp Account\" record (kept as plain text, not a Link, so this doctype has no hard dependency on frappe_whatsapp being installed on every site that has takion_whatsapp — e.g. the gateway site).",
+   "fieldname": "whatsapp_account",
+   "fieldtype": "Data",
+   "label": "WhatsApp Account",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "phone_number_id",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Phone Number ID",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "waba_id",
+   "fieldtype": "Data",
+   "label": "WABA ID"
+  },
+  {
+   "fieldname": "display_phone_number",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Display Phone Number"
+  },
+  {
+   "description": "Free text (not a Link to Company) for the same reason as WhatsApp Account above.",
+   "fieldname": "company",
+   "fieldtype": "Data",
+   "label": "Company"
+  },
+  {
+   "fieldname": "internal_shared_secret",
+   "fieldtype": "Password",
+   "label": "Internal Shared Secret",
+   "reqd": 1
+  },
+  {
+   "default": "Draft",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Draft\nPending Registration\nActive\nSuspended\nDisabled"
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "onboarded_by",
+   "fieldtype": "Link",
+   "label": "Onboarded By",
+   "options": "User"
+  },
+  {
+   "fieldname": "onboarded_on",
+   "fieldtype": "Date",
+   "label": "Onboarded On"
+  },
+  {
+   "fieldname": "onboarding_section",
+   "fieldtype": "Section Break",
+   "label": "Embedded Signup (reserved for WA-2)"
+  },
+  {
+   "default": "Manual",
+   "fieldname": "onboarding_source",
+   "fieldtype": "Select",
+   "label": "Onboarding Source",
+   "options": "Manual\nEmbedded Signup"
+  },
+  {
+   "fieldname": "business_id",
+   "fieldtype": "Data",
+   "label": "Business ID"
+  },
+  {
+   "fieldname": "embedded_signup_token",
+   "fieldtype": "Password",
+   "label": "Embedded Signup Token"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-07-24 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Takion WhatsApp",
+ "name": "WhatsApp Channel",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

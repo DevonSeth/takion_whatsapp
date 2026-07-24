@@ -1,0 +1,73 @@
+{
+ "actions": [],
+ "creation": "2026-07-24 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "meta_app_secret",
+  "meta_verify_token",
+  "column_break_1",
+  "failure_threshold",
+  "cooldown_seconds",
+  "alert_email"
+ ],
+ "fields": [
+  {
+   "fieldname": "meta_app_secret",
+   "fieldtype": "Password",
+   "label": "Meta App Secret",
+   "reqd": 1
+  },
+  {
+   "fieldname": "meta_verify_token",
+   "fieldtype": "Password",
+   "label": "Meta Verify Token",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "5",
+   "fieldname": "failure_threshold",
+   "fieldtype": "Int",
+   "label": "Failure Threshold"
+  },
+  {
+   "default": "300",
+   "fieldname": "cooldown_seconds",
+   "fieldtype": "Int",
+   "label": "Cooldown Seconds"
+  },
+  {
+   "fieldname": "alert_email",
+   "fieldtype": "Data",
+   "label": "Alert Email",
+   "options": "Email"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-07-24 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Takion WhatsApp",
+ "name": "WhatsApp Gateway Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

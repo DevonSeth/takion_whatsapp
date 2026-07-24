@@ -1,0 +1,142 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "field:whatsapp_message",
+ "creation": "2026-07-24 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "whatsapp_message",
+  "channel",
+  "direction",
+  "captured_at",
+  "column_break_1",
+  "pricing_type",
+  "pricing_category",
+  "billable",
+  "section_break_1",
+  "conversation_id",
+  "conversation_origin",
+  "column_break_2",
+  "currency",
+  "cost_amount",
+  "raw_pricing_json"
+ ],
+ "fields": [
+  {
+   "description": "Name of the linked frappe_whatsapp \"WhatsApp Message\" record (kept as plain text, not a Link, so this doctype has no hard dependency on frappe_whatsapp being installed on every site that has takion_whatsapp — e.g. the gateway site).",
+   "fieldname": "whatsapp_message",
+   "fieldtype": "Data",
+   "label": "WhatsApp Message",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "channel",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Channel",
+   "options": "WhatsApp Channel"
+  },
+  {
+   "fieldname": "direction",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Direction",
+   "options": "Inbound\nOutbound"
+  },
+  {
+   "fieldname": "captured_at",
+   "fieldtype": "Datetime",
+   "label": "Captured At"
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "pricing_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Pricing Type",
+   "options": "regular\nfree_customer_service\nfree_entry_point"
+  },
+  {
+   "fieldname": "pricing_category",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Pricing Category",
+   "options": "marketing\nmarketing_lite\nutility\nauthentication\nauthentication-international\nservice"
+  },
+  {
+   "default": "0",
+   "fieldname": "billable",
+   "fieldtype": "Check",
+   "label": "Billable"
+  },
+  {
+   "fieldname": "section_break_1",
+   "fieldtype": "Section Break",
+   "label": "Conversation"
+  },
+  {
+   "fieldname": "conversation_id",
+   "fieldtype": "Data",
+   "label": "Conversation ID"
+  },
+  {
+   "fieldname": "conversation_origin",
+   "fieldtype": "Data",
+   "label": "Conversation Origin"
+  },
+  {
+   "fieldname": "column_break_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "currency",
+   "fieldtype": "Link",
+   "label": "Currency",
+   "options": "Currency"
+  },
+  {
+   "fieldname": "cost_amount",
+   "fieldtype": "Currency",
+   "label": "Cost Amount",
+   "options": "currency"
+  },
+  {
+   "fieldname": "raw_pricing_json",
+   "fieldtype": "Code",
+   "label": "Raw Pricing JSON",
+   "options": "JSON"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-07-24 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Takion WhatsApp",
+ "name": "WhatsApp Message Cost",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

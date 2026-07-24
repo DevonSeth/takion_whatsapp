@@ -138,13 +138,15 @@ app_license = "mit"
 # ---------------
 # Hook on document methods and events
 
-# doc_events = {
-# 	"*": {
-# 		"on_update": "method",
-# 		"on_cancel": "method",
-# 		"on_trash": "method"
-# 	}
-# }
+# Fires only on client sites (where frappe_whatsapp is installed and its
+# "WhatsApp Message" doctype exists); harmless no-op dead code on the gateway
+# site, since no such documents are ever created there.
+doc_events = {
+	"WhatsApp Message": {
+		"after_insert": "takion_whatsapp.client.pricing.capture_pricing",
+		"on_update": "takion_whatsapp.client.pricing.capture_pricing",
+	}
+}
 
 # Scheduled Tasks
 # ---------------

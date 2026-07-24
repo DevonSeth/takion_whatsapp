@@ -1,0 +1,112 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "field:phone_number_id",
+ "creation": "2026-07-24 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "phone_number_id",
+  "waba_id",
+  "tenant_site_url",
+  "internal_shared_secret",
+  "is_active",
+  "column_break_1",
+  "circuit_state",
+  "consecutive_failures",
+  "opened_at",
+  "last_success_at",
+  "notes"
+ ],
+ "fields": [
+  {
+   "fieldname": "phone_number_id",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Phone Number ID",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "waba_id",
+   "fieldtype": "Data",
+   "label": "WABA ID"
+  },
+  {
+   "fieldname": "tenant_site_url",
+   "fieldtype": "Data",
+   "label": "Tenant Site URL",
+   "reqd": 1
+  },
+  {
+   "fieldname": "internal_shared_secret",
+   "fieldtype": "Password",
+   "label": "Internal Shared Secret",
+   "reqd": 1
+  },
+  {
+   "default": "1",
+   "fieldname": "is_active",
+   "fieldtype": "Check",
+   "label": "Is Active"
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Closed",
+   "fieldname": "circuit_state",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Circuit State",
+   "options": "Closed\nOpen\nHalf-Open"
+  },
+  {
+   "default": "0",
+   "fieldname": "consecutive_failures",
+   "fieldtype": "Int",
+   "label": "Consecutive Failures"
+  },
+  {
+   "fieldname": "opened_at",
+   "fieldtype": "Datetime",
+   "label": "Opened At"
+  },
+  {
+   "fieldname": "last_success_at",
+   "fieldtype": "Datetime",
+   "label": "Last Success At"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-07-24 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Takion WhatsApp",
+ "name": "WhatsApp Channel Registry",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
