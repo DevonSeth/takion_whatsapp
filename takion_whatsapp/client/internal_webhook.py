@@ -8,6 +8,7 @@ no fork, no re-serialization, no second network hop.
 import hmac
 
 import frappe
+from frappe import _
 from frappe_whatsapp.utils.webhook import webhook as frappe_whatsapp_webhook
 
 from takion_whatsapp.utils import extract_phone_number_id
@@ -34,10 +35,10 @@ def _verify_internal_secret(raw_body):
 		if phone_number_id else None
 	)
 	if not channel_name:
-		frappe.throw("Unknown channel", frappe.PermissionError)
+		frappe.throw(_("Unknown channel"), frappe.PermissionError)
 
 	expected = frappe.utils.password.get_decrypted_password(
 		"WhatsApp Channel", channel_name, "internal_shared_secret"
 	)
 	if not provided or not expected or not hmac.compare_digest(provided, expected):
-		frappe.throw("Invalid internal secret", frappe.PermissionError)
+		frappe.throw(_("Invalid internal secret"), frappe.PermissionError)

@@ -8,6 +8,7 @@ import hashlib
 import hmac
 
 import frappe
+from frappe import _
 from werkzeug.wrappers import Response
 
 from takion_whatsapp.utils import extract_phone_number_id
@@ -30,7 +31,7 @@ def _handshake():
 	expected_token = settings.get_password("meta_verify_token", raise_exception=False)
 
 	if mode != "subscribe" or not expected_token or verify_token != expected_token:
-		frappe.throw("Verification token mismatch", frappe.PermissionError)
+		frappe.throw(_("Verification token mismatch"), frappe.PermissionError)
 
 	return Response(challenge, status=200)
 
@@ -58,10 +59,10 @@ def _verify_signature(raw_body):
 	settings = frappe.get_single("WhatsApp Gateway Settings")
 	app_secret = settings.get_password("meta_app_secret", raise_exception=False)
 	if not app_secret:
-		frappe.throw("Gateway is not configured (missing meta_app_secret)", frappe.ValidationError)
+		frappe.throw(_("Gateway is not configured (missing meta_app_secret)"), frappe.ValidationError)
 
 	signature_header = frappe.get_request_header("X-Hub-Signature-256", "")
 	expected = "sha256=" + hmac.new(app_secret.encode(), raw_body, hashlib.sha256).hexdigest()
 
 	if not hmac.compare_digest(signature_header, expected):
-		frappe.throw("Invalid webhook signature", frappe.PermissionError)
+		frappe.throw(_("Invalid webhook signature"), frappe.PermissionError)
