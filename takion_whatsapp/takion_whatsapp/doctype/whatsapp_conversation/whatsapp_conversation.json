@@ -1,0 +1,120 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "format:{channel}-{phone_number}",
+ "creation": "2026-07-26 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "channel",
+  "phone_number",
+  "phone_number_display",
+  "wa_id",
+  "contact",
+  "status",
+  "column_break_1",
+  "last_message_at",
+  "last_message_preview",
+  "last_direction"
+ ],
+ "fields": [
+  {
+   "fieldname": "channel",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Channel",
+   "options": "WhatsApp Channel",
+   "reqd": 1
+  },
+  {
+   "description": "Canonical/normalized number used to group messages into this conversation (Brazilian mobile numbers' ambiguous 9th digit stripped — see takion_whatsapp.utils.normalize_phone_number). Internal matching key only — not shown to agents, use phone_number_display for that, and wa_id for sending.",
+   "fieldname": "phone_number",
+   "fieldtype": "Data",
+   "label": "Phone Number",
+   "reqd": 1
+  },
+  {
+   "description": "Human-facing number, always with the Brazilian 9th digit reinserted (every real BR mobile number has it — see takion_whatsapp.utils.format_phone_number_display). Derived from phone_number at creation, shown in the conversation list/thread.",
+   "fieldname": "phone_number_display",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Phone",
+   "read_only": 1
+  },
+  {
+   "description": "Raw wa_id as last reported by Meta on an inbound message from this contact — used verbatim as the \"to\" when sending replies, since it's the form Meta itself most recently confirmed as deliverable.",
+   "fieldname": "wa_id",
+   "fieldtype": "Data",
+   "label": "WhatsApp ID (send-to)"
+  },
+  {
+   "description": "Reuses Frappe's native Contact doctype (no new entity) — resolved by phone number, auto-created (phone number only) if no match exists.",
+   "fieldname": "contact",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Contact",
+   "options": "Contact"
+  },
+  {
+   "default": "Novo",
+   "description": "Plain configurable Select (not Kanban) — add/rename options via Customize Form.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Novo\nEm andamento\nAguardando cliente\nResolvido"
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "last_message_at",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Last Message At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_message_preview",
+   "fieldtype": "Data",
+   "label": "Last Message Preview",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_direction",
+   "fieldtype": "Select",
+   "label": "Last Direction",
+   "options": "Inbound\nOutbound",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-07-26 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Takion WhatsApp",
+ "name": "WhatsApp Conversation",
+ "naming_rule": "Expression",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

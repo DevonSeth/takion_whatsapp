@@ -143,7 +143,10 @@ app_license = "mit"
 # site, since no such documents are ever created there.
 doc_events = {
 	"WhatsApp Message": {
-		"after_insert": "takion_whatsapp.client.pricing.capture_pricing",
+		"after_insert": [
+			"takion_whatsapp.client.pricing.capture_pricing",
+			"takion_whatsapp.client.conversation.link_message_to_conversation",
+		],
 		"on_update": "takion_whatsapp.client.pricing.capture_pricing",
 	}
 }
