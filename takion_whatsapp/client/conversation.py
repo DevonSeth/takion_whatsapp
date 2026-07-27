@@ -15,13 +15,9 @@ and without the ambiguous 9th digit always resolve to the SAME conversation inst
 silently splitting into two.
 """
 import frappe
-from frappe.contacts.doctype.contact.contact import get_contact_with_phone_number
 
-from takion_whatsapp.utils import (
-	format_phone_number_display,
-	normalize_phone_number,
-	phone_number_candidates,
-)
+from takion_whatsapp.client import contacts
+from takion_whatsapp.utils import format_phone_number_display, normalize_phone_number
 
 
 def link_message_to_conversation(doc, method=None):
@@ -34,7 +30,7 @@ def link_message_to_conversation(doc, method=None):
 		return
 
 	phone_number = normalize_phone_number(raw_number)
-	conversation = _get_or_create_conversation(channel, phone_number, raw_number)
+	conversation = get_or_create_conversation(channel, phone_number, raw_number, auto_resolve_contact=True)
 
 	# Only trust an inbound message's "from" to update the send-to wa_id — it's Meta's
 	# own most recent confirmation of a deliverable ID for this contact. An outgoing
@@ -50,32 +46,27 @@ def link_message_to_conversation(doc, method=None):
 	_update_conversation_after_message(conversation, doc)
 
 
-def _get_or_create_conversation(channel, phone_number, raw_number):
+def get_or_create_conversation(channel, phone_number, raw_number, contact=None, auto_resolve_contact=False):
+	"""Shared by the inbound-message hook (auto_resolve_contact=True — no operator
+	present, resolves/creates a Contact automatically) and client/inbox.py's
+	start_conversation (contact passed explicitly, or left None on purpose for a
+	"Nova Conversa" against a bare phone number with no Contact yet).
+	"""
 	name = f"{channel}-{phone_number}"
 	if frappe.db.exists("WhatsApp Conversation", name):
 		return frappe.get_doc("WhatsApp Conversation", name)
+
+	if contact is None and auto_resolve_contact:
+		contact = contacts.resolve_or_create_contact(raw_number)
 
 	conversation = frappe.new_doc("WhatsApp Conversation")
 	conversation.channel = channel
 	conversation.phone_number = phone_number
 	conversation.phone_number_display = format_phone_number_display(phone_number)
 	conversation.wa_id = raw_number
-	conversation.contact = _resolve_contact(raw_number)
+	conversation.contact = contact
 	conversation.insert(ignore_permissions=True)
 	return conversation
-
-
-def _resolve_contact(raw_number):
-	for candidate in phone_number_candidates(raw_number):
-		existing = get_contact_with_phone_number(candidate)
-		if existing:
-			return existing
-
-	contact = frappe.new_doc("Contact")
-	contact.first_name = raw_number
-	contact.append("phone_nos", {"phone": raw_number, "is_primary_mobile_no": 1})
-	contact.insert(ignore_permissions=True)
-	return contact.name
 
 
 def _update_conversation_after_message(conversation, message):
