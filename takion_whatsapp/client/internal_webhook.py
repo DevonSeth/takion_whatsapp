@@ -11,6 +11,7 @@ import frappe
 from frappe import _
 from frappe_whatsapp.utils.webhook import webhook as frappe_whatsapp_webhook
 
+from takion_whatsapp.client.webhook_dedup import drop_duplicate_messages
 from takion_whatsapp.utils import extract_phone_number_id
 
 
@@ -18,6 +19,12 @@ from takion_whatsapp.utils import extract_phone_number_id
 def receive():
 	raw_body = frappe.request.get_data()
 	_verify_internal_secret(raw_body)
+
+	if not drop_duplicate_messages(frappe.local.form_dict):
+		# Every message in this delivery is already a stored WhatsApp Message --
+		# a Meta resend. Ack with a plain 200 (implicit, via the bare return) and
+		# stop here so frappe_whatsapp never inserts a duplicate record.
+		return
 
 	# Stashed for takion_whatsapp.client.pricing.capture_pricing, invoked synchronously
 	# via doc_events while frappe_whatsapp_webhook() below creates/updates WhatsApp Message.
