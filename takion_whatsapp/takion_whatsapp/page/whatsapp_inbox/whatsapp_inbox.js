@@ -5,7 +5,17 @@ frappe.pages['whatsapp-inbox'].on_page_load = function (wrapper) {
 		single_column: true,
 	});
 
-	new takion_whatsapp.WhatsAppInbox(page);
+	// Loaded sequentially, not as one frappe.require([...]) array: dynamically
+	// inserted <script> tags default to async=true, so two items in the same
+	// call can execute in either order. The Record plugin's UMD wrapper only
+	// extends an existing window.WaveSurfer, while the core lib's wrapper
+	// replaces window.WaveSurfer outright — if the plugin ran first, the core
+	// script would silently wipe it (window.WaveSurfer.Record undefined).
+	frappe.require('/assets/takion_whatsapp/js/lib/wavesurfer.min.js')
+		.then(() => frappe.require('/assets/takion_whatsapp/js/lib/wavesurfer.record.min.js'))
+		.then(() => {
+			new takion_whatsapp.WhatsAppInbox(page);
+		});
 };
 
 frappe.provide('takion_whatsapp');
@@ -15,6 +25,32 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 		this.page = page;
 		this.current_conversation = null;
 		this.filters = { status: '', tag: '', assigned_to: '' };
+
+		// Audio: real waveforms per message bubble (destroyed/recreated on each
+		// thread render), plus recording/preview state for the operator's own
+		// voice notes. MAX_RECORDING_SECONDS keeps the converted OGG/Opus file
+		// comfortably under the 512KB Meta uses to decide "native play icon" vs.
+		// "generic file to download".
+		this.waveforms = [];
+		this.MAX_RECORDING_SECONDS = 120;
+		this.record_wavesurfer = null;
+		this.record_plugin = null;
+		this.record_start = null;
+		this.record_timer = null;
+		this.preview_wavesurfer = null;
+		this.recorded_blob = null;
+		this._preview_url = null;
+		this._recording_cancelled = false;
+
+		// Search: in-conversation runs client-side over the already-loaded thread
+		// (thread_messages) — no round trip needed since get_thread already loads
+		// the whole history unpaginated. Global search hits the server instead,
+		// since conversations that aren't open yet have no messages in the browser.
+		this.thread_messages = [];
+		this.thread_search_query = '';
+		this.thread_search_matches = [];
+		this.thread_search_index = -1;
+		this.pending_jump_message = null;
 
 		this.inject_styles();
 		this.make_layout();
@@ -53,11 +89,22 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 			.wa-check-read { color: var(--blue-500, #2490ef); }
 			.wa-audio-bubble { display: flex; align-items: center; gap: 8px; min-width: 220px; }
 			.wa-audio-play { width: 30px; height: 30px; border-radius: 50%; background: var(--gray-500); color: #fff; border: none; flex-shrink: 0; }
-			.wa-audio-wave { flex: 1; height: 24px; display: flex; align-items: center; gap: 1.5px; }
-			.wa-audio-wave span { width: 2px; background: var(--gray-400); border-radius: 1px; }
+			.wa-audio-wave { flex: 1; height: 24px; }
 			.wa-audio-duration { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
-			.wa-thread-compose { padding: 10px; border-top: 1px solid var(--border-color); display: flex; gap: 8px; }
-			.wa-thread-compose textarea { flex: 1; resize: none; }
+			.wa-thread-compose { padding: 10px; border-top: 1px solid var(--border-color); }
+			.wa-compose-row { display: flex; align-items: center; gap: 8px; }
+			.wa-compose-text-row textarea { flex: 1; resize: none; }
+			.wa-compose-mic, .wa-compose-send, .wa-record-cancel, .wa-record-stop,
+			.wa-preview-play, .wa-preview-cancel, .wa-preview-send {
+				width: 34px; height: 34px; padding: 0; flex-shrink: 0;
+				display: flex; align-items: center; justify-content: center;
+				border-radius: 50%; line-height: 1;
+			}
+			.wa-record-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--red-500, #e03131); flex-shrink: 0; animation: wa-record-pulse 1.2s infinite; }
+			@keyframes wa-record-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+			.wa-record-timer, .wa-preview-duration { font-size: 12px; color: var(--text-muted); flex-shrink: 0; min-width: 34px; }
+			.wa-record-wave, .wa-preview-wave { flex: 1; height: 34px; }
+			.wa-optimistic-audio .wa-bubble-text { font-style: italic; }
 			.wa-contact-panel { width: 260px; border-left: 1px solid var(--border-color); padding: 14px; overflow-y: auto; }
 			.wa-contact-panel h5 { margin-bottom: 2px; }
 			.wa-contact-field { font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }
@@ -70,6 +117,17 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 			.wa-role-picker-result:hover { background: var(--fg-hover-color); }
 			.wa-role-picker-result:last-child { border-bottom: none; }
 			.wa-role-picker-empty { padding: 8px 10px; color: var(--text-muted); font-size: 12px; }
+			.wa-conversations-search { padding: 8px 8px 0; }
+			.wa-search-group { border-bottom: 1px solid var(--border-color); padding: 6px 0; }
+			.wa-search-group-title { font-weight: 600; font-size: 12px; padding: 4px 12px; }
+			.wa-search-result { padding: 4px 12px; font-size: 12px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+			.wa-search-result:hover { background: var(--fg-hover-color); }
+			.wa-search-match { background: var(--yellow-200, #fff3b0); border-radius: 2px; }
+			.wa-active-match-row .wa-bubble { outline: 2px solid var(--orange-400, #ff9f43); }
+			.wa-thread-header-top { display: flex; justify-content: space-between; align-items: center; }
+			.wa-thread-search-bar { display: flex; align-items: center; gap: 6px; padding-top: 6px; }
+			.wa-thread-search-bar input { flex: 1; font-size: 12px; padding: 2px 6px; }
+			.wa-thread-search-counter { font-size: 11px; color: var(--text-muted); min-width: 34px; text-align: center; }
 		</style>`).appendTo('head');
 	}
 
@@ -80,6 +138,9 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 					<div class="wa-conversations-toolbar" style="padding: 8px; display: flex; gap: 4px; border-bottom: 1px solid var(--border-color);">
 						<button class="btn btn-default btn-sm wa-new-contact" style="flex:1;">+ Novo Contato</button>
 						<button class="btn btn-default btn-sm wa-new-conversation" style="flex:1;">+ Nova Conversa</button>
+					</div>
+					<div class="wa-conversations-search">
+						<input class="form-control form-control-sm wa-global-search-input" placeholder="🔍 Buscar em todas as conversas">
 					</div>
 					<div class="wa-conversations-filters">
 						<select class="form-control wa-filter-status">
@@ -95,11 +156,40 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 					<div class="wa-conversations-list"></div>
 				</div>
 				<div class="wa-thread">
-					<div class="wa-thread-header"><span class="wa-empty-state" style="height:auto;">Selecione uma conversa</span></div>
+					<div class="wa-thread-header">
+						<div class="wa-thread-header-top">
+							<span class="wa-thread-title"><span class="wa-empty-state" style="height:auto;">Selecione uma conversa</span></span>
+							<button class="btn btn-default btn-xs wa-thread-search-toggle" style="display:none;" title="Buscar nesta conversa">🔍</button>
+						</div>
+						<div class="wa-thread-search-bar" style="display:none;">
+							<input class="form-control form-control-sm wa-thread-search-input" placeholder="Buscar nesta conversa">
+							<span class="wa-thread-search-counter">0/0</span>
+							<button class="btn btn-default btn-xs wa-thread-search-prev" title="Anterior">↑</button>
+							<button class="btn btn-default btn-xs wa-thread-search-next" title="Próxima">↓</button>
+							<button class="btn btn-default btn-xs wa-thread-search-close" title="Fechar">×</button>
+						</div>
+					</div>
 					<div class="wa-thread-messages"></div>
 					<div class="wa-thread-compose" style="display:none;">
-						<textarea class="form-control wa-compose-input" rows="1" placeholder="Digite uma mensagem"></textarea>
-						<button class="btn btn-primary btn-sm wa-compose-send">Enviar</button>
+						<div class="wa-compose-row wa-compose-text-row">
+							<textarea class="form-control wa-compose-input" rows="1" placeholder="Digite uma mensagem"></textarea>
+							<button class="btn btn-default btn-sm wa-compose-mic" title="Gravar áudio">🎤</button>
+							<button class="btn btn-primary btn-sm wa-compose-send" style="display:none;" title="Enviar">➤</button>
+						</div>
+						<div class="wa-compose-row wa-compose-record-row" style="display:none;">
+							<span class="wa-record-dot"></span>
+							<span class="wa-record-timer">0:00</span>
+							<div class="wa-record-wave"></div>
+							<button class="btn btn-default btn-sm wa-record-cancel" title="Cancelar gravação">🗑</button>
+							<button class="btn btn-primary btn-sm wa-record-stop" title="Parar gravação">⏹</button>
+						</div>
+						<div class="wa-compose-row wa-compose-preview-row" style="display:none;">
+							<button class="btn btn-default btn-sm wa-preview-play" title="Ouvir">▶</button>
+							<div class="wa-preview-wave"></div>
+							<span class="wa-preview-duration">0:00</span>
+							<button class="btn btn-default btn-sm wa-preview-cancel" title="Descartar">🗑</button>
+							<button class="btn btn-primary btn-sm wa-preview-send" title="Enviar áudio">➤</button>
+						</div>
 					</div>
 				</div>
 				<div class="wa-contact-panel"><div class="wa-empty-state">Nenhum contato selecionado</div></div>
@@ -130,6 +220,35 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 		main.on('click', '.wa-new-contact', () => this.open_new_contact_dialog());
 		main.on('click', '.wa-new-conversation', () => this.open_new_conversation_dialog());
 
+		main.on('input', '.wa-global-search-input', frappe.utils.debounce((e) => {
+			this.run_global_search(e.target.value.trim());
+		}, 300));
+		main.on('click', '.wa-search-result', (e) => {
+			const $row = $(e.currentTarget);
+			this.page.body.find('.wa-global-search-input').val('');
+			this.page.body.find('.wa-conversations-filters').show();
+			this.refresh_conversations();
+			this.open_conversation($row.data('conversation'), $row.data('message'));
+		});
+
+		main.on('click', '.wa-thread-search-toggle', () => this.toggle_thread_search());
+		main.on('click', '.wa-thread-search-close', () => this.toggle_thread_search());
+		main.on('input', '.wa-thread-search-input', frappe.utils.debounce((e) => {
+			this.thread_search_query = e.target.value.trim();
+			this.render_thread(this.thread_messages);
+		}, 200));
+		main.on('click', '.wa-thread-search-prev', () => this.thread_search_step(-1));
+		main.on('click', '.wa-thread-search-next', () => this.thread_search_step(1));
+		main.on('keydown', '.wa-thread-search-input', (e) => {
+			if (e.key === 'Enter') {
+				e.preventDefault();
+				this.thread_search_step(e.shiftKey ? -1 : 1);
+			} else if (e.key === 'Escape') {
+				e.preventDefault();
+				this.toggle_thread_search();
+			}
+		});
+
 		main.on('click', '.wa-compose-send', () => this.send_message());
 		main.on('keydown', '.wa-compose-input', (e) => {
 			if (e.key === 'Enter' && !e.shiftKey) {
@@ -137,8 +256,14 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 				this.send_message();
 			}
 		});
+		main.on('input', '.wa-compose-input', () => this.update_compose_buttons());
 
-		main.on('click', '.wa-audio-play', (e) => this.toggle_audio(e.currentTarget));
+		main.on('click', '.wa-compose-mic', () => this.start_recording());
+		main.on('click', '.wa-record-cancel', () => this.cancel_recording());
+		main.on('click', '.wa-record-stop', () => this.stop_recording());
+		main.on('click', '.wa-preview-play', () => this.toggle_preview_playback());
+		main.on('click', '.wa-preview-cancel', () => this.discard_recording());
+		main.on('click', '.wa-preview-send', () => this.send_recorded_audio());
 
 		main.on('change', '.wa-status-select', (e) => {
 			frappe.db.set_value('WhatsApp Conversation', this.current_conversation, 'status', e.target.value)
@@ -261,11 +386,20 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 		}[status] || 'gray';
 	}
 
-	open_conversation(name) {
+	open_conversation(name, jump_to_message) {
+		this.abort_compose_recording();
 		this.current_conversation = name;
+		this.pending_jump_message = jump_to_message || null;
+		this.thread_search_query = '';
+		this.thread_search_matches = [];
+		this.thread_search_index = -1;
+		this.page.body.find('.wa-thread-search-bar').hide();
+		this.page.body.find('.wa-thread-search-input').val('');
 		this.page.body.find('.wa-conversation-item').removeClass('active');
 		this.page.body.find(`.wa-conversation-item[data-name="${name}"]`).addClass('active');
 		this.page.body.find('.wa-thread-compose').show();
+		this.page.body.find('.wa-compose-input').val('');
+		this.update_compose_buttons();
 
 		this.load_thread(name);
 		this.load_contact_panel(name);
@@ -275,16 +409,184 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 		frappe.call({
 			method: 'takion_whatsapp.client.inbox.get_thread',
 			args: { conversation: name },
-		}).then((r) => this.render_thread(r.message || []));
+		}).then((r) => {
+			this.render_thread(r.message || []);
+			if (this.pending_jump_message) {
+				this.flash_highlight_message(this.pending_jump_message);
+				this.pending_jump_message = null;
+			}
+		});
 	}
 
 	render_thread(messages) {
-		const $header = this.page.body.find('.wa-thread-header');
-		$header.text(this.current_conversation);
+		this.page.body.find('.wa-thread-title').text(this.current_conversation);
+		this.page.body.find('.wa-thread-search-toggle').show();
 
+		this.waveforms.forEach((ws) => ws.destroy());
+		this.waveforms = [];
+
+		this.thread_messages = messages;
 		const $messages = this.page.body.find('.wa-thread-messages');
 		$messages.html(messages.map((m) => this.render_message(m)).join(''));
-		$messages.scrollTop($messages[0].scrollHeight);
+
+		this.init_waveforms(messages);
+
+		if (this.thread_search_query) {
+			this.thread_search_matches = messages
+				.filter((m) => (m.message || '').toLowerCase().includes(this.thread_search_query.toLowerCase()))
+				.map((m) => m.name);
+			// Defaults to the newest match — matches WhatsApp's own "search jumps to
+			// the most recent hit first" behavior; ↑/↓ step through older/newer ones.
+			this.thread_search_index = this.thread_search_matches.length - 1;
+			this.render_search_counter();
+			this.jump_to_current_match();
+		} else {
+			$messages.scrollTop($messages[0].scrollHeight);
+		}
+	}
+
+	// In-conversation search: entirely client-side, over thread_messages already
+	// loaded by load_thread — no backend round trip, since get_thread loads the
+	// whole (unpaginated) history up front.
+	toggle_thread_search() {
+		const $bar = this.page.body.find('.wa-thread-search-bar');
+		const opening = $bar.is(':hidden');
+		$bar.toggle(opening);
+		if (opening) {
+			this.page.body.find('.wa-thread-search-input').val('').focus();
+		} else {
+			this.thread_search_query = '';
+			this.thread_search_matches = [];
+			this.thread_search_index = -1;
+			this.render_thread(this.thread_messages);
+		}
+	}
+
+	thread_search_step(direction) {
+		const total = this.thread_search_matches.length;
+		if (!total) return;
+		this.thread_search_index = (this.thread_search_index + direction + total) % total;
+		this.render_search_counter();
+		this.jump_to_current_match();
+	}
+
+	render_search_counter() {
+		const total = this.thread_search_matches.length;
+		const current = total ? this.thread_search_index + 1 : 0;
+		this.page.body.find('.wa-thread-search-counter').text(`${current}/${total}`);
+	}
+
+	jump_to_current_match() {
+		this.page.body.find('.wa-bubble-row').removeClass('wa-active-match-row');
+		if (this.thread_search_index < 0) return;
+		const name = this.thread_search_matches[this.thread_search_index];
+		const $row = this.page.body.find(`.wa-bubble-row[data-message="${name}"]`);
+		$row.addClass('wa-active-match-row');
+		if ($row.length) $row[0].scrollIntoView({ block: 'center' });
+	}
+
+	// Used when a global search result opens a conversation the user didn't have
+	// open before — a one-off flash, distinct from the persistent highlight an
+	// active in-conversation search match gets.
+	flash_highlight_message(name) {
+		const $row = this.page.body.find(`.wa-bubble-row[data-message="${name}"]`);
+		if (!$row.length) return;
+		$row[0].scrollIntoView({ block: 'center' });
+		$row.addClass('wa-active-match-row');
+		setTimeout(() => $row.removeClass('wa-active-match-row'), 2000);
+	}
+
+	// Splits on the (escaped) query so each segment can be escaped for HTML
+	// independently — safer than highlighting after escaping the whole string,
+	// which could otherwise match inside an already-escaped entity like "&amp;".
+	highlight_text(text, query) {
+		const raw = text || '';
+		if (!query) return frappe.utils.escape_html(raw);
+		const escaped_query = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+		const parts = raw.split(new RegExp(`(${escaped_query})`, 'gi'));
+		return parts.map((part, i) => {
+			const safe = frappe.utils.escape_html(part);
+			return (i % 2 === 1 && part) ? `<mark class="wa-search-match">${safe}</mark>` : safe;
+		}).join('');
+	}
+
+	run_global_search(query) {
+		if (!query) {
+			this.page.body.find('.wa-conversations-filters').show();
+			this.refresh_conversations();
+			return;
+		}
+		this.page.body.find('.wa-conversations-filters').hide();
+		frappe.call({
+			method: 'takion_whatsapp.client.search.search_global',
+			args: { query },
+		}).then((r) => this.render_global_search_results(r.message || [], query));
+	}
+
+	render_global_search_results(groups, query) {
+		const $list = this.page.body.find('.wa-conversations-list');
+		if (!groups.length) {
+			$list.html('<div class="wa-empty-state">Nenhum resultado</div>');
+			return;
+		}
+
+		$list.html(groups.map((g) => {
+			const title = frappe.utils.escape_html(g.contact || g.phone_number_display || g.conversation);
+			return `
+				<div class="wa-search-group">
+					<div class="wa-search-group-title">${title}</div>
+					${g.matches.map((m) => `
+						<div class="wa-search-result" data-conversation="${g.conversation}" data-message="${m.name}">
+							${this.highlight_text(m.message || '', query)}
+						</div>
+					`).join('')}
+				</div>
+			`;
+		}).join(''));
+	}
+
+	// Resolves a Desk CSS variable (theme-aware) to a concrete color, since
+	// canvas fillStyle (what wavesurfer draws with) can't resolve var(--x) itself.
+	theme_color(var_name, fallback) {
+		const val = getComputedStyle(document.documentElement).getPropertyValue(var_name).trim();
+		return val || fallback;
+	}
+
+	init_waveforms(messages) {
+		messages.filter((m) => m.content_type === 'audio' && m.attach).forEach((m) => {
+			const $bubble = this.page.body.find(`.wa-audio-bubble[data-message="${m.name}"]`);
+			if (!$bubble.length) return;
+			const $button = $bubble.find('.wa-audio-play');
+			const $duration = $bubble.find('.wa-audio-duration');
+
+			const ws = WaveSurfer.create({
+				container: $bubble.find('.wa-audio-wave')[0],
+				url: m.attach,
+				height: 24,
+				barWidth: 2,
+				barGap: 1.5,
+				cursorWidth: 0,
+				waveColor: this.theme_color('--gray-400', '#bbb'),
+				progressColor: this.theme_color('--gray-600', '#666'),
+				interact: true,
+			});
+
+			ws.on('ready', () => $duration.text(this.format_duration(ws.getDuration())));
+			ws.on('audioprocess', () => $duration.text(this.format_duration(ws.getDuration() - ws.getCurrentTime())));
+			ws.on('finish', () => {
+				$button.text('▶');
+				$duration.text(this.format_duration(ws.getDuration()));
+			});
+
+			$button.on('click', () => {
+				this.waveforms.filter((w) => w !== ws).forEach((w) => w.pause());
+				this.page.body.find('.wa-audio-play').not($button).text('▶');
+				ws.playPause();
+				$button.text(ws.isPlaying() ? '⏸' : '▶');
+			});
+
+			this.waveforms.push(ws);
+		});
 	}
 
 	render_message(msg) {
@@ -296,7 +598,7 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 			: this.render_generic_bubble(msg);
 
 		return `
-			<div class="wa-bubble-row ${out ? 'out' : 'in'}">
+			<div class="wa-bubble-row ${out ? 'out' : 'in'}" data-message="${frappe.utils.escape_html(msg.name)}">
 				<div class="wa-bubble">
 					${body}
 					<div class="wa-bubble-time">${time}${check}</div>
@@ -319,54 +621,23 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 		if (msg.attach && ['document', 'video'].includes(msg.content_type)) {
 			return `<a href="${frappe.utils.escape_html(msg.attach)}" target="_blank">📎 ${frappe.utils.escape_html(msg.attach.split('/').pop())}</a>`;
 		}
-		const $text = $('<div class="wa-bubble-text"></div>').text(msg.message || '');
-		return $text.prop('outerHTML');
+		const html = this.thread_search_query
+			? this.highlight_text(msg.message || '', this.thread_search_query)
+			: frappe.utils.escape_html(msg.message || '');
+		return `<div class="wa-bubble-text">${html}</div>`;
 	}
 
 	render_audio_bubble(msg) {
-		// Simplified static waveform (visual only, not decoded from the actual audio
-		// samples) — matches the WhatsApp look without adding Web Audio analysis, which
-		// is out of scope for this Entrega.
-		const bars = Array.from({ length: 28 }, () => Math.round(6 + Math.random() * 18));
-		const wave = bars.map((h) => `<span style="height:${h}px"></span>`).join('');
-
+		// Real waveform: WhatsApp doesn't transmit pre-computed waveform data, so
+		// wavesurfer.js decodes the actual audio client-side. Instantiated after
+		// insertion by init_waveforms() (needs the container in the live DOM).
 		return `
-			<div class="wa-audio-bubble">
-				<audio class="wa-audio-el" src="${frappe.utils.escape_html(msg.attach || '')}" preload="metadata" style="display:none;"></audio>
+			<div class="wa-audio-bubble" data-message="${frappe.utils.escape_html(msg.name)}">
 				<button class="wa-audio-play">▶</button>
-				<div class="wa-audio-wave">${wave}</div>
+				<div class="wa-audio-wave"></div>
 				<span class="wa-audio-duration">--:--</span>
 			</div>
 		`;
-	}
-
-	toggle_audio(button) {
-		const $bubble = $(button).closest('.wa-audio-bubble');
-		const audio = $bubble.find('.wa-audio-el')[0];
-		const $duration = $bubble.find('.wa-audio-duration');
-
-		if (!audio.dataset.bound) {
-			audio.addEventListener('loadedmetadata', () => {
-				if (isFinite(audio.duration)) $duration.text(this.format_duration(audio.duration));
-			});
-			audio.addEventListener('timeupdate', () => {
-				$duration.text(this.format_duration(audio.duration - audio.currentTime));
-			});
-			audio.addEventListener('ended', () => {
-				$(button).text('▶');
-				$duration.text(this.format_duration(audio.duration));
-			});
-			audio.dataset.bound = '1';
-		}
-
-		if (audio.paused) {
-			$('.wa-audio-el').not(audio).each((i, el) => el.pause());
-			audio.play();
-			$(button).text('⏸');
-		} else {
-			audio.pause();
-			$(button).text('▶');
-		}
 	}
 
 	format_duration(seconds) {
@@ -387,9 +658,221 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 			args: { conversation: this.current_conversation, message: text },
 		}).then(() => {
 			$input.prop('disabled', false).focus();
+			this.update_compose_buttons();
 			this.load_thread(this.current_conversation);
 			this.refresh_conversations();
 		}).catch(() => $input.prop('disabled', false));
+	}
+
+	update_compose_buttons() {
+		const has_text = !!this.page.body.find('.wa-compose-input').val().trim();
+		this.page.body.find('.wa-compose-mic').toggle(!has_text);
+		this.page.body.find('.wa-compose-send').toggle(has_text);
+	}
+
+	show_compose_row(which) {
+		const $compose = this.page.body.find('.wa-thread-compose');
+		$compose.find('.wa-compose-text-row').toggle(which === 'text');
+		$compose.find('.wa-compose-record-row').toggle(which === 'record');
+		$compose.find('.wa-compose-preview-row').toggle(which === 'preview');
+		if (which === 'text') this.update_compose_buttons();
+	}
+
+	// Recording relies entirely on wavesurfer's Record plugin (same vendored lib
+	// as the playback waveform) rather than a hand-rolled MediaRecorder: it owns
+	// mic access, live waveform rendering, AND the recorded Blob, so there's a
+	// single audio dependency instead of two overlapping ones. mimeType/bitrate
+	// are capped client-side so the browser recording itself starts small —
+	// the real format fix (WebM/Opus -> OGG/Opus for native voice-note
+	// rendering) still happens server-side, see send_recorded_audio().
+	async start_recording() {
+		if (this.record_plugin) return;
+
+		const $wave = this.page.body.find('.wa-record-wave').empty();
+		const ws = WaveSurfer.create({
+			container: $wave[0],
+			height: 34,
+			waveColor: this.theme_color('--gray-400', '#bbb'),
+			progressColor: this.theme_color('--gray-600', '#666'),
+			cursorWidth: 0,
+		});
+		const record = ws.registerPlugin(WaveSurfer.Record.create({
+			scrollingWaveform: true,
+			renderRecordedAudio: false,
+			mimeType: 'audio/webm;codecs=opus',
+			audioBitsPerSecond: 32000,
+		}));
+		record.on('record-end', (blob) => this.on_recording_finished(blob));
+
+		try {
+			await record.startRecording();
+		} catch (e) {
+			ws.destroy();
+			frappe.msgprint(__('Não foi possível acessar o microfone. Verifique as permissões do navegador.'));
+			return;
+		}
+
+		this.record_wavesurfer = ws;
+		this.record_plugin = record;
+		this.record_start = Date.now();
+		this.show_compose_row('record');
+		this.update_record_timer();
+		this.record_timer = setInterval(() => {
+			this.update_record_timer();
+			if ((Date.now() - this.record_start) / 1000 >= this.MAX_RECORDING_SECONDS) {
+				this.stop_recording();
+			}
+		}, 250);
+	}
+
+	update_record_timer() {
+		const elapsed = (Date.now() - this.record_start) / 1000;
+		this.page.body.find('.wa-record-timer').text(this.format_duration(elapsed));
+	}
+
+	stop_recording() {
+		if (!this.record_plugin) return;
+		this.record_plugin.stopRecording();
+	}
+
+	cancel_recording() {
+		if (!this.record_plugin) {
+			this.show_compose_row('text');
+			return;
+		}
+		this._recording_cancelled = true;
+		this.record_plugin.stopRecording();
+	}
+
+	on_recording_finished(blob) {
+		clearInterval(this.record_timer);
+		this.record_timer = null;
+		// Not calling record_wavesurfer.destroy() here: the Record plugin's own
+		// stopRecording() already tears down the mic stream and its AudioContext,
+		// so destroy() would try to close an already-closed AudioContext (logs
+		// "Cannot close a closed AudioContext" as an unhandled rejection inside
+		// wavesurfer's own internals — harmless, but avoided by just dropping the
+		// reference; the container's DOM gets cleared on the next recording anyway).
+		this.record_wavesurfer = null;
+		this.record_plugin = null;
+
+		const cancelled = this._recording_cancelled;
+		this._recording_cancelled = false;
+
+		if (cancelled || !blob || !blob.size) {
+			this.show_compose_row('text');
+			return;
+		}
+
+		this.recorded_blob = blob;
+		this.show_recording_preview(blob);
+	}
+
+	show_recording_preview(blob) {
+		this.show_compose_row('preview');
+		const url = URL.createObjectURL(blob);
+		this._preview_url = url;
+
+		const $wave = this.page.body.find('.wa-preview-wave').empty();
+		const ws = WaveSurfer.create({
+			container: $wave[0],
+			height: 34,
+			url,
+			waveColor: this.theme_color('--gray-400', '#bbb'),
+			progressColor: this.theme_color('--gray-600', '#666'),
+			cursorWidth: 0,
+		});
+		const $duration = this.page.body.find('.wa-preview-duration');
+		ws.on('ready', () => $duration.text(this.format_duration(ws.getDuration())));
+		ws.on('audioprocess', () => $duration.text(this.format_duration(ws.getDuration() - ws.getCurrentTime())));
+		ws.on('finish', () => {
+			this.page.body.find('.wa-preview-play').text('▶');
+			$duration.text(this.format_duration(ws.getDuration()));
+		});
+
+		this.preview_wavesurfer = ws;
+	}
+
+	toggle_preview_playback() {
+		if (!this.preview_wavesurfer) return;
+		this.preview_wavesurfer.playPause();
+		this.page.body.find('.wa-preview-play').text(this.preview_wavesurfer.isPlaying() ? '⏸' : '▶');
+	}
+
+	discard_recording() {
+		if (this.preview_wavesurfer) {
+			this.preview_wavesurfer.destroy();
+			this.preview_wavesurfer = null;
+		}
+		if (this._preview_url) {
+			URL.revokeObjectURL(this._preview_url);
+			this._preview_url = null;
+		}
+		this.recorded_blob = null;
+		this.show_compose_row('text');
+	}
+
+	// Called when navigating away from the conversation mid-recording/preview,
+	// so a stray mic stream or unsent blob from a previous thread never leaks
+	// into the next one.
+	abort_compose_recording() {
+		if (this.record_plugin) {
+			this._recording_cancelled = true;
+			this.record_plugin.stopRecording();
+		}
+		this.discard_recording();
+	}
+
+	send_recorded_audio() {
+		if (!this.recorded_blob || !this.current_conversation) return;
+		const blob = this.recorded_blob;
+		const conversation = this.current_conversation;
+
+		this.discard_recording();
+		this.render_optimistic_audio_bubble();
+
+		const form_data = new FormData();
+		form_data.append('file', blob, `voice-note-${Date.now()}.webm`);
+		form_data.append('is_private', 0);
+		form_data.append('doctype', 'WhatsApp Conversation');
+		form_data.append('docname', conversation);
+
+		fetch('/api/method/upload_file', {
+			method: 'POST',
+			headers: { 'X-Frappe-CSRF-Token': frappe.csrf_token },
+			body: form_data,
+		})
+			.then((r) => r.json())
+			.then((r) => {
+				const file_url = r.message && r.message.file_url;
+				if (!file_url) throw new Error('upload failed');
+				return frappe.call({
+					method: 'takion_whatsapp.client.inbox.send_audio_message',
+					args: { conversation, file_url },
+				});
+			})
+			.catch(() => {
+				frappe.msgprint(__('Não foi possível enviar o áudio. Tente novamente.'));
+			});
+	}
+
+	// The real send happens in a background job (WebM->OGG/Opus conversion via
+	// ffmpeg, then the same frappe_whatsapp send path text messages use) — this
+	// bubble is a client-side placeholder only, replaced wholesale once
+	// `whatsapp_inbox_update` triggers a real load_thread(). The timeout is a
+	// fallback in case that realtime event is ever missed, not the primary path.
+	render_optimistic_audio_bubble() {
+		const conversation = this.current_conversation;
+		const $messages = this.page.body.find('.wa-thread-messages');
+		$messages.append(`
+			<div class="wa-bubble-row out wa-optimistic-audio">
+				<div class="wa-bubble"><div class="wa-bubble-text text-muted">🎙️ ${__('Enviando áudio…')}</div></div>
+			</div>
+		`);
+		$messages.scrollTop($messages[0].scrollHeight);
+		setTimeout(() => {
+			if (this.current_conversation === conversation) this.load_thread(conversation);
+		}, 15000);
 	}
 
 	load_contact_panel(name) {

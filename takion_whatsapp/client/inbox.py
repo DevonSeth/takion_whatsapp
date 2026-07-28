@@ -70,6 +70,24 @@ def send_message(conversation, message):
 
 
 @frappe.whitelist()
+def send_audio_message(conversation, file_url):
+	"""Operator-recorded voice note. Unlike send_message, this doesn't send
+	synchronously — the uploaded file (file_url) is the browser's raw
+	WebM/Opus recording, which needs a WebM->OGG/Opus conversion (via ffmpeg)
+	before it can go to Meta as a native voice-note bubble. See
+	takion_whatsapp.client.audio.convert_and_send for the actual conversion
+	and send, run in the background so the request returns immediately.
+	"""
+	frappe.get_doc("WhatsApp Conversation", conversation)  # 404s / permission-checks up front
+	frappe.enqueue(
+		"takion_whatsapp.client.audio.convert_and_send",
+		queue="short",
+		conversation=conversation,
+		file_url=file_url,
+	)
+
+
+@frappe.whitelist()
 def list_templates(channel):
 	"""Approved templates available to start a new conversation on this channel —
 	Meta only allows a business-initiated conversation via one of these (or within
