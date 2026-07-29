@@ -1,0 +1,122 @@
+[
+ {
+  "app": null,
+  "charts": [
+   {
+    "chart_name": "Conversas por Status",
+    "label": null
+   },
+   {
+    "chart_name": "Mensagens por Dia",
+    "label": null
+   }
+  ],
+  "content": "[{\"id\": \"hdr1\", \"type\": \"header\", \"data\": {\"text\": \"<b>WhatsApp</b>\", \"col\": 12}}, {\"id\": \"d01574a555\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"Conversas Abertas\", \"col\": 6}}, {\"id\": \"d2dbea5384\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"Total de Mensagens\", \"col\": 6}}, {\"id\": \"b1e1d332f9\", \"type\": \"chart\", \"data\": {\"chart_name\": \"Conversas por Status\", \"col\": 6}}, {\"id\": \"6d177975cd\", \"type\": \"chart\", \"data\": {\"chart_name\": \"Mensagens por Dia\", \"col\": 6}}]",
+  "custom_blocks": [],
+  "docstatus": 0,
+  "doctype": "Workspace",
+  "external_link": null,
+  "for_user": null,
+  "hide_custom": 0,
+  "icon": null,
+  "indicator_color": "green",
+  "is_hidden": 0,
+  "label": "WhatsApp",
+  "link_to": null,
+  "link_type": "DocType",
+  "links": [],
+  "modified": "2026-07-28 22:58:03.196504",
+  "module": null,
+  "name": "WhatsApp",
+  "number_cards": [
+   {
+    "label": null,
+    "number_card_name": "Conversas Abertas"
+   },
+   {
+    "label": null,
+    "number_card_name": "Total de Mensagens"
+   }
+  ],
+  "parent_page": "Comunicacao",
+  "public": 1,
+  "quick_lists": [],
+  "restrict_to_domain": null,
+  "roles": [],
+  "sequence_id": 1.0,
+  "shortcuts": [
+   {
+    "color": null,
+    "doc_view": "List",
+    "format": null,
+    "icon": null,
+    "kanban_board": null,
+    "label": "WhatsApp Account",
+    "link_to": "WhatsApp Account",
+    "report_ref_doctype": null,
+    "restrict_to_domain": null,
+    "stats_filter": null,
+    "type": "DocType",
+    "url": null
+   },
+   {
+    "color": null,
+    "doc_view": "List",
+    "format": null,
+    "icon": null,
+    "kanban_board": null,
+    "label": "WhatsApp Channel",
+    "link_to": "WhatsApp Channel",
+    "report_ref_doctype": null,
+    "restrict_to_domain": null,
+    "stats_filter": null,
+    "type": "DocType",
+    "url": null
+   },
+   {
+    "color": null,
+    "doc_view": "List",
+    "format": null,
+    "icon": null,
+    "kanban_board": null,
+    "label": "WhatsApp Message",
+    "link_to": "WhatsApp Message",
+    "report_ref_doctype": null,
+    "restrict_to_domain": null,
+    "stats_filter": null,
+    "type": "DocType",
+    "url": null
+   },
+   {
+    "color": null,
+    "doc_view": "List",
+    "format": null,
+    "icon": null,
+    "kanban_board": null,
+    "label": "WhatsApp Message Cost",
+    "link_to": "WhatsApp Message Cost",
+    "report_ref_doctype": null,
+    "restrict_to_domain": null,
+    "stats_filter": null,
+    "type": "DocType",
+    "url": null
+   },
+   {
+    "color": null,
+    "doc_view": "List",
+    "format": null,
+    "icon": null,
+    "kanban_board": null,
+    "label": "WhatsApp Templates",
+    "link_to": "WhatsApp Templates",
+    "report_ref_doctype": null,
+    "restrict_to_domain": null,
+    "stats_filter": null,
+    "type": "DocType",
+    "url": null
+   }
+  ],
+  "title": "WhatsApp",
+  "type": "Workspace"
+ }
+]

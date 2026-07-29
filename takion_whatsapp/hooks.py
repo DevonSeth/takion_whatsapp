@@ -151,6 +151,23 @@ doc_events = {
 	}
 }
 
+# Fixtures
+# --------
+# Entrega 6 ("Onda 0", config-only): sales-funnel Kanban Boards, the WhatsApp UTM
+# Source, the WhatsApp workspace's dashboard Number Cards/Charts, and enabling
+# Appointment Booking Settings + its generic weekends-off Holiday List. Shipped here
+# (not as workspace/*.json app exports) since developer_mode is off on every
+# environment -- this is the reproducible-on-install mechanism instead.
+fixtures = [
+	{"dt": "UTM Source", "filters": [["name", "=", "WhatsApp"]]},
+	{"dt": "Kanban Board", "filters": [["name", "in", ["Funil de Leads", "Funil de Oportunidades"]]]},
+	{"dt": "Holiday List", "filters": [["name", "like", "Fins de Semana %"]]},
+	{"dt": "Appointment Booking Settings"},
+	{"dt": "Number Card", "filters": [["module", "=", "Takion WhatsApp"]]},
+	{"dt": "Dashboard Chart", "filters": [["module", "=", "Takion WhatsApp"]]},
+	{"dt": "Workspace", "filters": [["name", "=", "WhatsApp"]]},
+]
+
 # Scheduled Tasks
 # ---------------
 

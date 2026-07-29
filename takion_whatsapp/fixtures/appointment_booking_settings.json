@@ -1,0 +1,71 @@
+[
+ {
+  "action_for_expired_unverified_appointments": "Mark as Closed",
+  "advance_booking_days": 30,
+  "agent_list": [],
+  "appointment_duration": 30,
+  "availability_of_slots": [
+   {
+    "day_of_week": "Monday",
+    "from_time": "9:00:00",
+    "to_time": "12:00:00"
+   },
+   {
+    "day_of_week": "Monday",
+    "from_time": "13:00:00",
+    "to_time": "18:00:00"
+   },
+   {
+    "day_of_week": "Tuesday",
+    "from_time": "9:00:00",
+    "to_time": "12:00:00"
+   },
+   {
+    "day_of_week": "Tuesday",
+    "from_time": "13:00:00",
+    "to_time": "18:00:00"
+   },
+   {
+    "day_of_week": "Wednesday",
+    "from_time": "9:00:00",
+    "to_time": "12:00:00"
+   },
+   {
+    "day_of_week": "Wednesday",
+    "from_time": "13:00:00",
+    "to_time": "18:00:00"
+   },
+   {
+    "day_of_week": "Thursday",
+    "from_time": "9:00:00",
+    "to_time": "12:00:00"
+   },
+   {
+    "day_of_week": "Thursday",
+    "from_time": "13:00:00",
+    "to_time": "18:00:00"
+   },
+   {
+    "day_of_week": "Friday",
+    "from_time": "9:00:00",
+    "to_time": "12:00:00"
+   },
+   {
+    "day_of_week": "Friday",
+    "from_time": "13:00:00",
+    "to_time": "18:00:00"
+   }
+  ],
+  "docstatus": 0,
+  "doctype": "Appointment Booking Settings",
+  "email_reminders": 1,
+  "enable_appointment_portal": 1,
+  "enable_scheduling": 1,
+  "holiday_list": "Fins de Semana 2026",
+  "modified": "2026-07-28 22:58:03.067886",
+  "name": "Appointment Booking Settings",
+  "number_of_agents": 0,
+  "success_redirect_url": null,
+  "verification_link_expiry_duration": 30
+ }
+]

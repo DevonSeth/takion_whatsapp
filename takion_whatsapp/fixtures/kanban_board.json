@@ -1,0 +1,134 @@
+[
+ {
+  "columns": [
+   {
+    "column_name": "Lead",
+    "indicator": "Gray",
+    "order": "[]",
+    "status": "Active"
+   },
+   {
+    "column_name": "Open",
+    "indicator": "Blue",
+    "order": "[]",
+    "status": "Active"
+   },
+   {
+    "column_name": "Replied",
+    "indicator": "Cyan",
+    "order": "[]",
+    "status": "Active"
+   },
+   {
+    "column_name": "Interested",
+    "indicator": "Purple",
+    "order": "[]",
+    "status": "Active"
+   },
+   {
+    "column_name": "Opportunity",
+    "indicator": "Orange",
+    "order": "[]",
+    "status": "Active"
+   },
+   {
+    "column_name": "Quotation",
+    "indicator": "Yellow",
+    "order": "[]",
+    "status": "Active"
+   },
+   {
+    "column_name": "Converted",
+    "indicator": "Green",
+    "order": "[]",
+    "status": "Active"
+   },
+   {
+    "column_name": "Lost Quotation",
+    "indicator": "Red",
+    "order": "[]",
+    "status": "Active"
+   },
+   {
+    "column_name": "Do Not Contact",
+    "indicator": "Gray",
+    "order": "[]",
+    "status": "Active"
+   }
+  ],
+  "docstatus": 0,
+  "doctype": "Kanban Board",
+  "field_name": "status",
+  "fields": null,
+  "filters": null,
+  "kanban_board_name": "Funil de Leads",
+  "modified": "2026-07-28 22:58:34.978104",
+  "name": "Funil de Leads",
+  "private": 0,
+  "reference_doctype": "Lead",
+  "show_labels": 0
+ },
+ {
+  "columns": [
+   {
+    "column_name": "Negotiation/Review",
+    "indicator": "Blue",
+    "order": "[]",
+    "status": "Active"
+   },
+   {
+    "column_name": "Proposal/Price Quote",
+    "indicator": "Blue",
+    "order": "[]",
+    "status": "Active"
+   },
+   {
+    "column_name": "Perception Analysis",
+    "indicator": "Blue",
+    "order": "[]",
+    "status": "Active"
+   },
+   {
+    "column_name": "Identifying Decision Makers",
+    "indicator": "Blue",
+    "order": "[]",
+    "status": "Active"
+   },
+   {
+    "column_name": "Value Proposition",
+    "indicator": "Blue",
+    "order": "[]",
+    "status": "Active"
+   },
+   {
+    "column_name": "Needs Analysis",
+    "indicator": "Blue",
+    "order": "[]",
+    "status": "Active"
+   },
+   {
+    "column_name": "Qualification",
+    "indicator": "Blue",
+    "order": "[]",
+    "status": "Active"
+   },
+   {
+    "column_name": "Prospecting",
+    "indicator": "Blue",
+    "order": "[]",
+    "status": "Active"
+   }
+  ],
+  "docstatus": 0,
+  "doctype": "Kanban Board",
+  "field_name": "sales_stage",
+  "fields": null,
+  "filters": null,
+  "kanban_board_name": "Funil de Oportunidades",
+  "modified": "2026-07-28 22:58:37.204473",
+  "name": "Funil de Oportunidades",
+  "private": 0,
+  "reference_doctype": "Opportunity",
+  "show_labels": 0
+ }
+]
