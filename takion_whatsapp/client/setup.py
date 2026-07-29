@@ -33,10 +33,73 @@ CUSTOM_FIELDS = {
 			"insert_after": "origin_doctype",
 			"read_only": 1,
 		},
-	]
+	],
+	# Entrega 10 ("Transmissão Segura"): per-recipient pacing state -- only ever
+	# populated by client/broadcast.py's BulkWhatsAppMessageMixin, on the
+	# WhatsApp Recipient rows a Bulk WhatsApp Message snapshots onto itself.
+	# Rows belonging to a plain WhatsApp Recipient List (the reusable segment
+	# definition, not a specific broadcast run) never get this field set.
+	"WhatsApp Recipient": [
+		{
+			"fieldname": "send_status",
+			"fieldtype": "Select",
+			"options": "\nPending\nSent\nFailed\nOpt-out",
+			"label": "Status de Envio",
+			"insert_after": "recipient_data",
+			"read_only": 1,
+			"in_list_view": 1,
+		},
+	],
+	# Entrega 10, item 5: turns a WhatsApp Recipient List into an optionally
+	# dynamic segment -- see client/segments.py.
+	"WhatsApp Recipient List": [
+		{
+			"fieldname": "auto_refresh",
+			"fieldtype": "Check",
+			"label": "Atualização automática (segmento dinâmico)",
+			"insert_after": "import_limit",
+			"description": (
+				"Reaplica periodicamente o mesmo filtro de importação (DocType/campos/filtros "
+				"já configurados acima), via o cron de 5 minutos já existente -- pula listas "
+				"em uso por uma transmissão em andamento."
+			),
+		},
+		{
+			"fieldname": "refresh_frequency_hours",
+			"fieldtype": "Int",
+			"label": "Frequência de atualização (horas)",
+			"default": "24",
+			"depends_on": "eval:doc.auto_refresh",
+			"insert_after": "auto_refresh",
+		},
+		{
+			"fieldname": "last_refreshed_at",
+			"fieldtype": "Datetime",
+			"label": "Última atualização automática",
+			"read_only": 1,
+			"insert_after": "refresh_frequency_hours",
+		},
+	],
+	# Entrega 10, item 4: atributo informativo da transmissão -- não propagado
+	# automaticamente para Lead.utm_campaign (fora do escopo desta Entrega).
+	"Bulk WhatsApp Message": [
+		{
+			"fieldname": "utm_campaign",
+			"fieldtype": "Link",
+			"options": "UTM Campaign",
+			"label": "UTM Campaign",
+			"insert_after": "recipient_count",
+			"description": (
+				"Vincula esta transmissão a uma UTM Campaign para relatórios de ROI (ex.: "
+				"campaign_efficiency) -- não propagado automaticamente para Leads que "
+				"respondam a esta transmissão."
+			),
+		},
+	],
 }
 
 
 def after_migrate():
 	create_custom_fields(CUSTOM_FIELDS)
-	frappe.clear_cache(doctype="WhatsApp Message")
+	for doctype in CUSTOM_FIELDS:
+		frappe.clear_cache(doctype=doctype)

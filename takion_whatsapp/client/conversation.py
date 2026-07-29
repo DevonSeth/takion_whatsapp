@@ -89,8 +89,18 @@ def _update_conversation_after_message(conversation, message):
 	conversation.last_message_at = frappe.utils.now_datetime()
 	conversation.last_message_preview = frappe.utils.strip_html(message.message or "")[:140]
 	conversation.last_direction = direction
-	if direction == "Inbound" and conversation.status == "Resolvido":
-		conversation.status = "Em andamento"
+	if direction == "Inbound":
+		if conversation.status == "Resolvido":
+			conversation.status = "Em andamento"
+		# Entrega 9 (SLA): only set on the inbound-when-empty transition -- NOT
+		# reassigned on every inbound message, or a customer sending several
+		# messages in a row would keep resetting their own wait clock. Cleared
+		# below the moment we reply, so a fresh wait starts on their next message.
+		if not conversation.first_unanswered_inbound_at:
+			conversation.first_unanswered_inbound_at = conversation.last_message_at
+	else:
+		conversation.first_unanswered_inbound_at = None
+		conversation.sla_state = "OK"
 	conversation.save(ignore_permissions=True)
 
 	frappe.publish_realtime(

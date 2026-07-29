@@ -1,0 +1,72 @@
+{
+ "actions": [],
+ "creation": "2026-07-29 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "optout_section",
+  "optout_keywords",
+  "optout_confirmation_message",
+  "pacing_section",
+  "broadcast_batch_size"
+ ],
+ "fields": [
+  {
+   "fieldname": "optout_section",
+   "fieldtype": "Section Break",
+   "label": "Opt-out (LGPD)"
+  },
+  {
+   "default": "PARAR\nSAIR\nCANCELAR\nSTOP\nDESCADASTRAR",
+   "description": "Uma palavra-chave por linha. Uma mensagem recebida é comparada (sem diferenciar maiúsculas/minúsculas, ignorando pontuação) com o texto INTEIRO da mensagem -- não é uma busca por trecho, para não confundir frases como \"não vou parar de comprar com vocês\" com um pedido de descadastro.",
+   "fieldname": "optout_keywords",
+   "fieldtype": "Small Text",
+   "label": "Palavras-chave de opt-out",
+   "reqd": 1
+  },
+  {
+   "default": "Você foi removido(a) da nossa lista de transmissões e não receberá mais mensagens de marketing por aqui. Se quiser voltar a receber, é só nos chamar novamente.",
+   "description": "Enviada automaticamente, sempre, ao detectar um opt-out -- piso de conformidade LGPD, não uma opção configurável para desligar.",
+   "fieldname": "optout_confirmation_message",
+   "fieldtype": "Small Text",
+   "label": "Mensagem de confirmação de opt-out",
+   "reqd": 1
+  },
+  {
+   "fieldname": "pacing_section",
+   "fieldtype": "Section Break",
+   "label": "Pacing de transmissão"
+  },
+  {
+   "default": "50",
+   "description": "Quantos destinatários pendentes de uma transmissão são processados por execução do cron de 5 minutos (mesma infraestrutura de scheduler_events da Entrega 9). Ajuste conforme os limites de taxa da sua conta Meta.",
+   "fieldname": "broadcast_batch_size",
+   "fieldtype": "Int",
+   "label": "Tamanho do lote",
+   "reqd": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-07-29 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Takion WhatsApp",
+ "name": "WhatsApp Broadcast Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

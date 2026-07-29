@@ -389,6 +389,7 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 					<div class="wa-conversation-preview">${direction_icon} ${preview}</div>
 					<div class="wa-conversation-meta">
 						<span class="indicator-pill ${this.status_color(c.status)}">${frappe.utils.escape_html(c.status || '')}</span>
+						${this.render_sla_badge(c.sla_state)}
 						${tags.map((t) => `<span class="wa-tag-chip">${frappe.utils.escape_html(t)}</span>`).join('')}
 						${assignees.length ? `<span class="wa-assign-chip" title="${frappe.utils.escape_html(assignees[0])}">${frappe.utils.escape_html(assignees[0][0] || '?').toUpperCase()}</span>` : ''}
 					</div>
@@ -404,6 +405,15 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 			'Aguardando cliente': 'yellow',
 			'Resolvido': 'green',
 		}[status] || 'gray';
+	}
+
+	// Entrega 9 (SLA): quiet by default -- "OK" (the vast majority of
+	// conversations, most of the time) renders nothing at all, only "Em risco"/
+	// "Estourado" get a pill, so the badge only draws the eye when it matters.
+	render_sla_badge(sla_state) {
+		if (!sla_state || sla_state === 'OK') return '';
+		const color = sla_state === 'Estourado' ? 'red' : 'orange';
+		return `<span class="indicator-pill ${color}" title="SLA">${frappe.utils.escape_html(sla_state)}</span>`;
 	}
 
 	open_conversation(name, jump_to_message) {

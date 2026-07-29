@@ -143,12 +143,14 @@ app_license = "mit"
 # such documents are ever created there.
 doc_events = {
 	"WhatsApp Message": {
-		# Order is load-bearing: capture_referral relies on the WhatsApp
-		# Conversation already existing, which link_message_to_conversation is
-		# what creates/resolves it. See client/attribution.py's module docstring.
+		# Order is load-bearing: capture_referral and detect_optout both rely on
+		# the WhatsApp Conversation already existing, which
+		# link_message_to_conversation is what creates/resolves it. See
+		# client/attribution.py's and client/optout.py's module docstrings.
 		"after_insert": [
 			"takion_whatsapp.client.pricing.capture_pricing",
 			"takion_whatsapp.client.conversation.link_message_to_conversation",
+			"takion_whatsapp.client.optout.detect_optout",
 			"takion_whatsapp.client.attribution.capture_referral",
 		],
 		"on_update": "takion_whatsapp.client.pricing.capture_pricing",
@@ -197,6 +199,12 @@ fixtures = [
 	# (create_custom_fields), this entry only exports the resulting records so a
 	# completely fresh install (before any migrate has run) still reproduces them.
 	{"dt": "Custom Field", "filters": [["dt", "=", "WhatsApp Message"], ["fieldname", "in", ["origin_doctype", "origin_name"]]]},
+	# Entrega 10 ("Transmissão Segura"): same idempotent-creation/fixture-export
+	# split as Entrega 8, above, for the three other third-party doctypes this
+	# Entrega adds Custom Fields to.
+	{"dt": "Custom Field", "filters": [["dt", "=", "WhatsApp Recipient"], ["fieldname", "=", "send_status"]]},
+	{"dt": "Custom Field", "filters": [["dt", "=", "WhatsApp Recipient List"], ["fieldname", "in", ["auto_refresh", "refresh_frequency_hours", "last_refreshed_at"]]]},
+	{"dt": "Custom Field", "filters": [["dt", "=", "Bulk WhatsApp Message"], ["fieldname", "=", "utm_campaign"]]},
 ]
 
 # after_migrate
@@ -206,23 +214,21 @@ after_migrate = ["takion_whatsapp.client.setup.after_migrate"]
 # Scheduled Tasks
 # ---------------
 
-# scheduler_events = {
-# 	"all": [
-# 		"takion_whatsapp.tasks.all"
-# 	],
-# 	"daily": [
-# 		"takion_whatsapp.tasks.daily"
-# 	],
-# 	"hourly": [
-# 		"takion_whatsapp.tasks.hourly"
-# 	],
-# 	"weekly": [
-# 		"takion_whatsapp.tasks.weekly"
-# 	],
-# 	"monthly": [
-# 		"takion_whatsapp.tasks.monthly"
-# 	],
-# }
+# Entrega 9 ("SLA / detecção de mensagem perdida"): the app's first
+# scheduler_events. Entrega 10 ("Transmissão Segura") reuses this same
+# 5-minute cron for broadcast pacing and dynamic-segment refresh, rather than
+# introducing a second cadence. Every 5 minutes, not "all" (v16's ~60s tick is
+# too frequent for checks this cheap-but-not-free). See client/sla.py's,
+# client/broadcast.py's and client/segments.py's module docstrings.
+scheduler_events = {
+	"cron": {
+		"*/5 * * * *": [
+			"takion_whatsapp.client.sla.check_sla",
+			"takion_whatsapp.client.broadcast.process_pending_batches",
+			"takion_whatsapp.client.segments.refresh_dynamic_segments",
+		],
+	},
+}
 
 # Testing
 # -------
@@ -238,8 +244,16 @@ after_migrate = ["takion_whatsapp.client.setup.after_migrate"]
 # prevents ERPNext's own auto_creation_of_contact from spawning a second,
 # disconnected Contact when a Lead is created for a phone number the WhatsApp
 # module already resolved a Contact for. See client/pipeline.py's LeadMixin.
+#
+# Entrega 10 ("Transmissão Segura"): BulkWhatsAppMessageMixin replaces
+# queue_messages() with paced, opt-out-aware sending (client/broadcast.py).
+# WhatsAppRecipientListMixin fixes a real persistence bug in
+# import_list_from_doctype() that would otherwise break dynamic segments
+# (client/segments.py).
 extend_doctype_class = {
 	"Lead": "takion_whatsapp.client.pipeline.LeadMixin",
+	"Bulk WhatsApp Message": "takion_whatsapp.client.broadcast.BulkWhatsAppMessageMixin",
+	"WhatsApp Recipient List": "takion_whatsapp.client.segments.WhatsAppRecipientListMixin",
 }
 
 # Overriding Methods

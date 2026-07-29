@@ -20,7 +20,13 @@
   "ctwa_clid",
   "referral_source_type",
   "referral_headline",
-  "raw_referral_json"
+  "raw_referral_json",
+  "sla_section",
+  "first_unanswered_inbound_at",
+  "sla_state",
+  "optout_section",
+  "opted_out",
+  "opted_out_at"
  ],
  "fields": [
   {
@@ -126,6 +132,50 @@
    "fieldtype": "Code",
    "label": "Raw Referral JSON",
    "options": "JSON",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sla_section",
+   "fieldtype": "Section Break",
+   "label": "SLA"
+  },
+  {
+   "description": "Set only on the inbound-when-empty transition (a new customer message with no reply pending yet), cleared on the next outbound message -- see client/conversation.py. NOT the same as last_message_at, which is overwritten by every message including inbound and would never hold still long enough to measure a wait.",
+   "fieldname": "first_unanswered_inbound_at",
+   "fieldtype": "Datetime",
+   "label": "First Unanswered Inbound At",
+   "read_only": 1
+  },
+  {
+   "default": "OK",
+   "description": "Computed every few minutes by client/sla.py against WhatsApp SLA Settings' thresholds -- never set directly.",
+   "fieldname": "sla_state",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "SLA",
+   "options": "OK\nEm risco\nEstourado",
+   "read_only": 1
+  },
+  {
+   "fieldname": "optout_section",
+   "fieldtype": "Section Break",
+   "label": "Opt-out (LGPD)"
+  },
+  {
+   "default": "0",
+   "description": "Definido por client/optout.py ao detectar uma palavra-chave de descadastro (WhatsApp Broadcast Settings) numa mensagem inbound -- filtra este número tanto na montagem quanto no envio de qualquer Bulk WhatsApp Message. Não afeta respostas de atendimento normais, só transmissões.",
+   "fieldname": "opted_out",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Optou por sair (transmissões)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "opted_out_at",
+   "fieldtype": "Datetime",
+   "label": "Opt-out em",
    "read_only": 1
   }
  ],

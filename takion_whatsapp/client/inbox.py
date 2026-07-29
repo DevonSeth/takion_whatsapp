@@ -33,6 +33,7 @@ def get_conversations(status=None, tag=None, assigned_to=None):
 			"last_message_preview",
 			"last_direction",
 			"last_message_at",
+			"sla_state",
 			"_assign",
 			"_user_tags",
 		],

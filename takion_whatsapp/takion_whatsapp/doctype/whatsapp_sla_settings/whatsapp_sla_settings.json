@@ -1,0 +1,155 @@
+{
+ "actions": [],
+ "creation": "2026-07-29 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "enabled",
+  "holiday_list",
+  "column_break_1",
+  "business_start_time",
+  "business_end_time",
+  "business_days_section",
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "column_break_days",
+  "friday",
+  "saturday",
+  "sunday",
+  "section_break_1",
+  "warning_threshold_minutes",
+  "breach_threshold_minutes"
+ ],
+ "fields": [
+  {
+   "default": "1",
+   "description": "Turns the whole SLA check off (scheduler task still runs but no-ops) without deleting the configured thresholds.",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled"
+  },
+  {
+   "description": "Dates to skip entirely when counting elapsed business time (weekends, holidays). Optional -- leave empty to count every calendar day.",
+   "fieldname": "holiday_list",
+   "fieldtype": "Link",
+   "label": "Holiday List",
+   "options": "Holiday List"
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "09:00:00",
+   "fieldname": "business_start_time",
+   "fieldtype": "Time",
+   "label": "Business Start Time",
+   "reqd": 1
+  },
+  {
+   "default": "18:00:00",
+   "fieldname": "business_end_time",
+   "fieldtype": "Time",
+   "label": "Business End Time",
+   "reqd": 1
+  },
+  {
+   "fieldname": "business_days_section",
+   "fieldtype": "Section Break",
+   "label": "Dias de atendimento"
+  },
+  {
+   "default": "1",
+   "description": "Dias sem atendimento (desmarcados aqui) são pulados por inteiro no cálculo de SLA -- mesmo efeito prático de um feriado, sem precisar cadastrar cada domingo/segunda na Holiday List.",
+   "fieldname": "monday",
+   "fieldtype": "Check",
+   "label": "Segunda"
+  },
+  {
+   "default": "1",
+   "fieldname": "tuesday",
+   "fieldtype": "Check",
+   "label": "Terça"
+  },
+  {
+   "default": "1",
+   "fieldname": "wednesday",
+   "fieldtype": "Check",
+   "label": "Quarta"
+  },
+  {
+   "default": "1",
+   "fieldname": "thursday",
+   "fieldtype": "Check",
+   "label": "Quinta"
+  },
+  {
+   "fieldname": "column_break_days",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "fieldname": "friday",
+   "fieldtype": "Check",
+   "label": "Sexta"
+  },
+  {
+   "default": "0",
+   "fieldname": "saturday",
+   "fieldtype": "Check",
+   "label": "Sábado"
+  },
+  {
+   "default": "0",
+   "fieldname": "sunday",
+   "fieldtype": "Check",
+   "label": "Domingo"
+  },
+  {
+   "fieldname": "section_break_1",
+   "fieldtype": "Section Break",
+   "label": "Limiares de SLA"
+  },
+  {
+   "default": "15",
+   "description": "Minutos de horário comercial sem resposta a uma mensagem inbound até o status virar \"Em risco\". Ajuste por tipo de negócio -- não há um valor correto universal.",
+   "fieldname": "warning_threshold_minutes",
+   "fieldtype": "Int",
+   "label": "Aviso (minutos)",
+   "reqd": 1
+  },
+  {
+   "default": "60",
+   "description": "Minutos de horário comercial sem resposta até o status virar \"Estourado\" -- dispara notificação pro agente atribuído, além do indicador visual.",
+   "fieldname": "breach_threshold_minutes",
+   "fieldtype": "Int",
+   "label": "Estourado (minutos)",
+   "reqd": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-07-29 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Takion WhatsApp",
+ "name": "WhatsApp SLA Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
