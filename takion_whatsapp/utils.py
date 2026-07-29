@@ -98,3 +98,14 @@ def extract_statuses(raw_body):
 		return data["entry"][0]["changes"][0]["value"].get("statuses", [])
 	except (KeyError, IndexError, ValueError, TypeError):
 		return []
+
+
+def extract_messages(raw_body):
+	"""Pull the messages[] array (inbound customer messages, incl. any `referral`
+	object from a Click-to-WhatsApp ad) out of a raw Meta payload. Outbound status
+	updates never appear here -- those are in extract_statuses()'s statuses[]."""
+	try:
+		data = json.loads(raw_body)
+		return data["entry"][0]["changes"][0]["value"].get("messages", [])
+	except (KeyError, IndexError, ValueError, TypeError):
+		return []

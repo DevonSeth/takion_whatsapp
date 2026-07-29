@@ -15,7 +15,7 @@ from frappe.contacts.doctype.contact.contact import get_contact_with_phone_numbe
 
 from takion_whatsapp.utils import phone_number_candidates
 
-LINKABLE_DOCTYPES = ("Customer", "Supplier", "Employee")
+LINKABLE_DOCTYPES = ("Customer", "Supplier", "Employee", "Lead", "Opportunity", "Prospect")
 
 _PRIMARY_CONTACT_FIELD = {
 	"Customer": "customer_primary_contact",
@@ -26,7 +26,17 @@ _TITLE_FIELD = {
 	"Customer": "customer_name",
 	"Supplier": "supplier_name",
 	"Employee": "employee_name",
+	"Lead": "lead_name",
+	"Opportunity": "title",
+	"Prospect": "company_name",
 }
+
+# Doctypes with their own per-role context summary (Entrega 7), dispatched via the
+# whatsapp_context_providers hook -- see client/context_providers.py and hooks.py.
+# Lead/Opportunity are deliberately excluded here: they get their own "Funil" section
+# (client/pipeline.py) instead of a role-chip summary, since an Opportunity can reach
+# a Contact transitively through a Lead without ever being in Contact.links itself.
+CONTEXT_ROLE_DOCTYPES = ("Customer", "Supplier", "Employee")
 
 
 def _unlinked_employee_matches(raw_number):
@@ -129,6 +139,27 @@ def link_existing_role(contact, link_doctype, link_name):
 		frappe.db.set_value(link_doctype, link_name, primary_field, contact)
 
 	return get_contact_roles(contact)
+
+
+@frappe.whitelist()
+def get_role_context(link_doctype, link_name):
+	"""Lazy-loaded per-role summary for the contact panel's role chips (Entrega 7,
+	item 5.2) -- fetched only when the operator expands a chip, never eagerly.
+	Dispatched through the whatsapp_context_providers hook so takion_whatsapp never
+	hardcodes what a Customer/Supplier/Employee summary looks like; each provider
+	owns its own domain logic (see client/context_providers.py for the defaults
+	this app registers). Returns None if no provider is registered for this
+	doctype or if the doctype isn't one of CONTEXT_ROLE_DOCTYPES.
+	"""
+	if link_doctype not in CONTEXT_ROLE_DOCTYPES:
+		return None
+
+	providers = frappe.get_hooks("whatsapp_context_providers") or {}
+	handlers = providers.get(link_doctype)
+	if not handlers:
+		return None
+
+	return frappe.get_attr(handlers[0])(link_name)
 
 
 @frappe.whitelist()

@@ -15,7 +15,12 @@
   "column_break_1",
   "last_message_at",
   "last_message_preview",
-  "last_direction"
+  "last_direction",
+  "attribution_section",
+  "ctwa_clid",
+  "referral_source_type",
+  "referral_headline",
+  "raw_referral_json"
  ],
  "fields": [
   {
@@ -90,6 +95,37 @@
    "fieldtype": "Select",
    "label": "Last Direction",
    "options": "Inbound\nOutbound",
+   "read_only": 1
+  },
+  {
+   "fieldname": "attribution_section",
+   "fieldtype": "Section Break",
+   "label": "Atribuição (Click-to-WhatsApp)"
+  },
+  {
+   "description": "Meta's click-to-WhatsApp ad click id, from the `referral` object on this contact's first inbound message. Only ever set once (first inbound message wins) -- see client/attribution.py.",
+   "fieldname": "ctwa_clid",
+   "fieldtype": "Data",
+   "label": "CTWA Click ID",
+   "read_only": 1
+  },
+  {
+   "fieldname": "referral_source_type",
+   "fieldtype": "Data",
+   "label": "Referral Source Type",
+   "read_only": 1
+  },
+  {
+   "fieldname": "referral_headline",
+   "fieldtype": "Data",
+   "label": "Referral Headline",
+   "read_only": 1
+  },
+  {
+   "fieldname": "raw_referral_json",
+   "fieldtype": "Code",
+   "label": "Raw Referral JSON",
+   "options": "JSON",
    "read_only": 1
   }
  ],

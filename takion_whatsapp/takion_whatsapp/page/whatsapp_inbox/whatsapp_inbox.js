@@ -20,6 +20,14 @@ frappe.pages['whatsapp-inbox'].on_page_load = function (wrapper) {
 
 frappe.provide('takion_whatsapp');
 
+// Doctypes with a per-role context provider registered (see hooks.py's
+// whatsapp_context_providers) -- these get a clickable Papéis chip. Lead/Opportunity
+// render in their own "Funil" section instead, since an Opportunity can reach a
+// Contact transitively through a Lead without ever being in Contact.links itself
+// (see client/pipeline.py::get_pipeline_state).
+const WA_CONTEXT_ROLE_DOCTYPES = ['Customer', 'Supplier', 'Employee'];
+const WA_FUNNEL_DOCTYPES = ['Lead', 'Opportunity'];
+
 takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 	constructor(page) {
 		this.page = page;
@@ -117,6 +125,11 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 			.wa-role-picker-result:hover { background: var(--fg-hover-color); }
 			.wa-role-picker-result:last-child { border-bottom: none; }
 			.wa-role-picker-empty { padding: 8px 10px; color: var(--text-muted); font-size: 12px; }
+			.wa-role-context-toggle { cursor: pointer; }
+			.wa-role-context-toggle.active { background: var(--fg-hover-color); }
+			.wa-role-context-body { font-size: 12px; margin-top: 6px; padding: 6px 8px; border: 1px solid var(--border-color); border-radius: var(--border-radius); }
+			.wa-funnel-chip { display: block; width: fit-content; max-width: 100%; white-space: normal; margin-bottom: 4px; }
+			.wa-funnel-chip a { color: inherit; }
 			.wa-conversations-search { padding: 8px 8px 0; }
 			.wa-search-group { border-bottom: 1px solid var(--border-color); padding: 6px 0; }
 			.wa-search-group-title { font-weight: 600; font-size: 12px; padding: 4px 12px; }
@@ -319,8 +332,15 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 
 		main.on('click', '.wa-role-add', (e) => {
 			const contact = $(e.currentTarget).data('contact');
-			this.open_role_picker(contact, () => this.load_contact_panel(this.current_conversation));
+			const conversation = this.current_conversation;
+			frappe.db.get_value('WhatsApp Conversation', conversation, 'wa_id').then((r) => {
+				this.open_role_picker(contact, () => this.load_contact_panel(conversation), r.message.wa_id);
+			});
 		});
+
+		// Per-role context summary (Entrega 7, item 5.2): lazy-loaded on first
+		// click, toggled off on a second click on the same chip.
+		main.on('click', '.wa-role-context-toggle', (e) => this.toggle_role_context($(e.currentTarget)));
 
 		main.on('click', '.wa-link-contact-to-conversation', () => {
 			this.link_bare_conversation_to_contact();
@@ -881,21 +901,78 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 				Promise.all([
 					frappe.db.get_doc('Contact', conversation.contact),
 					frappe.call({ method: 'takion_whatsapp.client.contacts.get_contact_roles', args: { contact: conversation.contact } }),
-				]).then(([contact, roles_resp]) => this.render_contact_panel(conversation, contact, roles_resp.message || []));
+					frappe.call({ method: 'takion_whatsapp.client.pipeline.get_pipeline_state', args: { contact: conversation.contact } }),
+				]).then(([contact, roles_resp, pipeline_resp]) =>
+					this.render_contact_panel(conversation, contact, roles_resp.message || [], pipeline_resp.message || { leads: [], opportunities: [] })
+				);
 			} else {
-				this.render_contact_panel(conversation, null, []);
+				this.render_contact_panel(conversation, null, [], { leads: [], opportunities: [] });
 			}
 		});
 	}
 
-	render_contact_panel(conversation, contact, roles) {
+	toggle_role_context($chip) {
+		const doctype = $chip.data('doctype');
+		const name = $chip.data('name');
+		const $body = this.page.body.find('.wa-role-context-body');
+		const already_open = $chip.hasClass('active');
+
+		this.page.body.find('.wa-role-context-toggle').removeClass('active');
+		if (already_open) {
+			$body.hide().empty();
+			return;
+		}
+
+		$chip.addClass('active');
+		$body.show().html('<div class="text-muted">Carregando…</div>');
+		frappe.call({
+			method: 'takion_whatsapp.client.contacts.get_role_context',
+			args: { link_doctype: doctype, link_name: name },
+		}).then((r) => $body.html(this.render_role_context(doctype, r.message)));
+	}
+
+	// frappe.format's Currency fieldtype wraps the result in its own block-level
+	// <div style="text-align:right">, meant for table cells -- wrong here, where
+	// it forces an awkward line-break inside a short inline label. Plain text.
+	format_currency_brl(value) {
+		return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value || 0);
+	}
+
+	render_role_context(doctype, ctx) {
+		if (!ctx) return '<div class="text-muted">Sem detalhes</div>';
+		if (doctype === 'Customer') {
+			const lo = ctx.last_order;
+			return `
+				<div>Último pedido: ${lo ? `${frappe.utils.escape_html(lo.name)} (${frappe.utils.escape_html(lo.status)})` : '—'}</div>
+				<div>Saldo em aberto: ${this.format_currency_brl(ctx.outstanding_amount)}</div>
+			`;
+		}
+		if (doctype === 'Supplier') {
+			const po = ctx.last_po;
+			return `
+				<div>Última compra: ${po ? `${frappe.utils.escape_html(po.name)} (${frappe.utils.escape_html(po.status)})` : '—'}</div>
+				<div>Entregas pendentes: ${ctx.pending_deliveries || 0}</div>
+			`;
+		}
+		if (doctype === 'Employee') {
+			return `
+				<div>Departamento: ${frappe.utils.escape_html(ctx.department || '—')}</div>
+				<div>Cargo: ${frappe.utils.escape_html(ctx.designation || '—')}</div>
+				<div>Status: ${frappe.utils.escape_html(ctx.status || '—')}</div>
+			`;
+		}
+		return '';
+	}
+
+	render_contact_panel(conversation, contact, roles, pipeline) {
 		const $panel = this.page.body.find('.wa-contact-panel');
 		const tags = (conversation._user_tags || '').split(',').map((t) => t.trim()).filter(Boolean);
 		let assignees = [];
 		try { assignees = JSON.parse(conversation._assign || '[]'); } catch (e) { assignees = []; }
 
 		const name = contact ? [contact.first_name, contact.last_name].filter(Boolean).join(' ') : conversation.phone_number_display;
-		const role_labels = { Customer: 'Cliente', Supplier: 'Fornecedor', Employee: 'Funcionário' };
+		const role_labels = { Customer: 'Cliente', Supplier: 'Fornecedor', Employee: 'Funcionário', Lead: 'Lead', Opportunity: 'Oportunidade', Prospect: 'Prospect' };
+		const paper_roles = roles.filter((r) => !WA_FUNNEL_DOCTYPES.includes(r.doctype));
 
 		$panel.html(`
 			<h5>${frappe.utils.escape_html(name || '')}</h5>
@@ -905,14 +982,35 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 
 			${contact ? `
 				<div class="mt-3"><label class="text-muted small">Papéis</label><br>
-					${roles.map((r) => `<span class="wa-role-chip" title="${frappe.utils.escape_html(r.name)}">${frappe.utils.escape_html(role_labels[r.doctype] || r.doctype)}: ${frappe.utils.escape_html(r.title)}</span>`).join('')}
+					${paper_roles.map((r) => {
+						const clickable = WA_CONTEXT_ROLE_DOCTYPES.includes(r.doctype);
+						return `<span class="wa-role-chip${clickable ? ' wa-role-context-toggle' : ''}" data-doctype="${frappe.utils.escape_html(r.doctype)}" data-name="${frappe.utils.escape_html(r.name)}" title="${frappe.utils.escape_html(r.name)}">${frappe.utils.escape_html(role_labels[r.doctype] || r.doctype)}: ${frappe.utils.escape_html(r.title)}</span>`;
+					}).join('')}
 					<span class="wa-role-chip wa-role-add" data-contact="${frappe.utils.escape_html(contact.name)}">+</span>
 				</div>
+				<div class="wa-role-context-body" style="display:none;"></div>
 			` : `
 				<div class="mt-3">
 					<button class="btn btn-default btn-xs wa-link-contact-to-conversation">+ Cadastrar contato</button>
 				</div>
 			`}
+
+			${pipeline && (pipeline.leads.length || pipeline.opportunities.length) ? `
+				<div class="mt-3"><label class="text-muted small">Funil</label><br>
+					${pipeline.leads.map((l) => `
+						<span class="wa-role-chip wa-funnel-chip" title="${frappe.utils.escape_html(l.name)}">
+							<a href="/app/lead/${encodeURIComponent(l.name)}" target="_blank">Lead: ${frappe.utils.escape_html(l.lead_name || l.name)}</a>
+							<small class="text-muted">(${frappe.utils.escape_html(l.status)})</small>
+						</span>
+					`).join('')}
+					${pipeline.opportunities.map((o) => `
+						<span class="wa-role-chip wa-funnel-chip" title="${frappe.utils.escape_html(o.name)}">
+							<a href="/app/opportunity/${encodeURIComponent(o.name)}" target="_blank">Oport.: ${frappe.utils.escape_html(o.title || o.name)}</a>
+							<small class="text-muted">(${frappe.utils.escape_html(o.status)}${o.opportunity_amount ? ', ' + this.format_currency_brl(o.opportunity_amount) : ''})</small>
+						</span>
+					`).join('')}
+				</div>
+			` : ''}
 
 			<div class="mt-3"><label class="text-muted small">Status</label>
 				<select class="form-control form-control-sm wa-status-select">
@@ -1028,16 +1126,16 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 		});
 	}
 
-	// Reusable "+ add role" picker: search an existing Customer/Supplier/Employee
-	// to link, or create a new one via Frappe's own quick-entry (so mandatory
-	// fields per doctype — e.g. Employee's — are always respected). Used both from
-	// the contact panel's "+" badge and right after "Novo Contato" creates a bare
-	// Contact with no roles yet.
+	// Reusable "+ add role" picker: search an existing Customer/Supplier/Employee/
+	// Lead/Opportunity/Prospect to link, or create a new one via Frappe's own
+	// quick-entry (so mandatory fields per doctype — e.g. Employee's — are always
+	// respected). Used both from the contact panel's "+" badge and right after
+	// "Novo Contato" creates a bare Contact with no roles yet.
 	open_role_picker(contact, on_linked, suggest_phone) {
 		const dialog = new frappe.ui.Dialog({
 			title: 'Vincular papel',
 			fields: [
-				{ fieldname: 'link_doctype', label: 'Tipo', fieldtype: 'Select', reqd: 1, options: 'Customer\nSupplier\nEmployee' },
+				{ fieldname: 'link_doctype', label: 'Tipo', fieldtype: 'Select', reqd: 1, options: 'Customer\nSupplier\nEmployee\nLead\nOpportunity\nProspect' },
 				{ fieldname: 'search', label: 'Buscar existente', fieldtype: 'Data' },
 				{ fieldname: 'results', fieldtype: 'HTML' },
 			],
@@ -1045,6 +1143,17 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 			primary_action: () => {
 				const link_doctype = dialog.get_value('link_doctype');
 				dialog.hide();
+
+				// Lead's own controller (LeadMixin, see client/pipeline.py) dedups
+				// against an existing Contact by whatsapp_no/mobile_no/phone before
+				// creating a new one — prefilling whatsapp_no here is what lets that
+				// dedup find THIS Contact instead of spawning a disconnected one.
+				let quick_entry_doc = null;
+				if (link_doctype === 'Lead' && suggest_phone) {
+					quick_entry_doc = frappe.model.get_new_doc('Lead');
+					quick_entry_doc.whatsapp_no = suggest_phone;
+				}
+
 				// frappe.new_doc's public callback only fires on load, not after save —
 				// make_quick_entry's `after_insert` is the one that fires post-save, with
 				// the created doc, which is what we need to link right after creation.
@@ -1053,7 +1162,7 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 						method: 'takion_whatsapp.client.contacts.link_existing_role',
 						args: { contact, link_doctype, link_name: doc.name },
 					}).then(() => on_linked());
-				});
+				}, null, quick_entry_doc);
 			},
 		});
 

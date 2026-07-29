@@ -39,6 +39,20 @@ def link_message_to_conversation(doc, method=None):
 	if doc.type == "Incoming":
 		conversation.wa_id = raw_number
 
+	# WhatsApp Notification (frappe_whatsapp's funnel automation engine) stamps
+	# reference_doctype/reference_name onto the triggering document (e.g. a Lead)
+	# before this hook runs -- preserved here as origin_doctype/origin_name
+	# (custom fields, see client/setup.py) before it gets overwritten below, or
+	# the automated message would silently vanish from that Lead's own timeline.
+	# Only captured once: a message's origin never changes across repeated saves.
+	if (
+		doc.reference_doctype
+		and doc.reference_doctype != "WhatsApp Conversation"
+		and not doc.get("origin_doctype")
+	):
+		doc.db_set("origin_doctype", doc.reference_doctype, update_modified=False)
+		doc.db_set("origin_name", doc.reference_name, update_modified=False)
+
 	if doc.reference_doctype != "WhatsApp Conversation" or doc.reference_name != conversation.name:
 		doc.db_set("reference_doctype", "WhatsApp Conversation", update_modified=False)
 		doc.db_set("reference_name", conversation.name, update_modified=False)

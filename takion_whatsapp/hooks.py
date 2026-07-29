@@ -138,17 +138,43 @@ app_license = "mit"
 # ---------------
 # Hook on document methods and events
 
-# Fires only on client sites (where frappe_whatsapp is installed and its
-# "WhatsApp Message" doctype exists); harmless no-op dead code on the gateway
-# site, since no such documents are ever created there.
+# Fires only on client sites (where frappe_whatsapp / erpnext are installed and
+# these doctypes exist); harmless no-op dead code on the gateway site, since no
+# such documents are ever created there.
 doc_events = {
 	"WhatsApp Message": {
+		# Order is load-bearing: capture_referral relies on the WhatsApp
+		# Conversation already existing, which link_message_to_conversation is
+		# what creates/resolves it. See client/attribution.py's module docstring.
 		"after_insert": [
 			"takion_whatsapp.client.pricing.capture_pricing",
 			"takion_whatsapp.client.conversation.link_message_to_conversation",
+			"takion_whatsapp.client.attribution.capture_referral",
 		],
 		"on_update": "takion_whatsapp.client.pricing.capture_pricing",
-	}
+	},
+	# Entrega 7 ("Contexto & Funil"): reverse half of the Conversation<->Funnel
+	# join -- a Lead created outside WhatsApp that carries a whatsapp_no still
+	# resolves onto the same Contact a WhatsApp message for that number would
+	# use. See client/pipeline.py's module docstring.
+	"Lead": {
+		"after_insert": "takion_whatsapp.client.pipeline.resolve_conversation_for_lead",
+	},
+}
+
+# Custom hook (not a Frappe built-in): per-role context summary for the contact
+# panel's role chips (Entrega 7, item 5.2 of the WhatsApp feature backlog).
+# Keyed by the linked doctype (must be one of client/contacts.py's
+# CONTEXT_ROLE_DOCTYPES); value is a dotted path to a function(name) -> dict.
+# frappe.get_hooks merges every installed app's entry for the same key into a
+# list -- client/contacts.py::get_role_context always dispatches to the first
+# one, so a niche Takion build wanting a different summary for the same
+# doctype overrides this by registering its own app earlier in the install
+# order, not by editing this file.
+whatsapp_context_providers = {
+	"Customer": "takion_whatsapp.client.context_providers.customer_context",
+	"Supplier": "takion_whatsapp.client.context_providers.supplier_context",
+	"Employee": "takion_whatsapp.client.context_providers.employee_context",
 }
 
 # Fixtures
@@ -166,7 +192,16 @@ fixtures = [
 	{"dt": "Number Card", "filters": [["module", "=", "Takion WhatsApp"]]},
 	{"dt": "Dashboard Chart", "filters": [["module", "=", "Takion WhatsApp"]]},
 	{"dt": "Workspace", "filters": [["name", "=", "WhatsApp"]]},
+	# Entrega 8: origin_doctype/origin_name Custom Fields on frappe_whatsapp's
+	# "WhatsApp Message" -- actually created idempotently by after_migrate below
+	# (create_custom_fields), this entry only exports the resulting records so a
+	# completely fresh install (before any migrate has run) still reproduces them.
+	{"dt": "Custom Field", "filters": [["dt", "=", "WhatsApp Message"], ["fieldname", "in", ["origin_doctype", "origin_name"]]]},
 ]
+
+# after_migrate
+# -------------
+after_migrate = ["takion_whatsapp.client.setup.after_migrate"]
 
 # Scheduled Tasks
 # ---------------
@@ -198,9 +233,14 @@ fixtures = [
 # ------------------------------
 #
 # Specify custom mixins to extend the standard doctype controller.
-# extend_doctype_class = {
-# 	"Task": "takion_whatsapp.custom.task.CustomTaskMixin"
-# }
+
+# Entrega 7 ("Contexto & Funil"): dedup half of the Conversation<->Funnel join --
+# prevents ERPNext's own auto_creation_of_contact from spawning a second,
+# disconnected Contact when a Lead is created for a phone number the WhatsApp
+# module already resolved a Contact for. See client/pipeline.py's LeadMixin.
+extend_doctype_class = {
+	"Lead": "takion_whatsapp.client.pipeline.LeadMixin",
+}
 
 # Overriding Methods
 # ------------------------------
