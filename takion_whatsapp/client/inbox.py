@@ -27,7 +27,7 @@ URL_PATTERN = re.compile(r"https?://\S+")
 
 
 @frappe.whitelist()
-def get_conversations(status=None, tag=None, assigned_to=None):
+def get_conversations(status=None, tag=None, assigned_to=None, unread_only=None):
 	filters = {}
 	if status:
 		# Multi-select filter: JS sends a JSON-encoded array (possibly with a
@@ -40,6 +40,8 @@ def get_conversations(status=None, tag=None, assigned_to=None):
 		filters["_user_tags"] = ["like", f"%{tag}%"]
 	if assigned_to:
 		filters["_assign"] = ["like", f"%{assigned_to}%"]
+	if frappe.utils.cint(unread_only):
+		filters["is_unread"] = 1
 
 	return frappe.get_list(
 		"WhatsApp Conversation",
@@ -48,10 +50,12 @@ def get_conversations(status=None, tag=None, assigned_to=None):
 			"name",
 			"phone_number_display",
 			"contact",
+			"whatsapp_group",
 			"status",
 			"last_message_preview",
 			"last_direction",
 			"last_message_at",
+			"is_unread",
 			"sla_state",
 			"_assign",
 			"_user_tags",
@@ -68,9 +72,19 @@ def get_thread(conversation):
 			"reference_doctype": "WhatsApp Conversation",
 			"reference_name": conversation,
 		},
-		fields=["name", "type", "content_type", "message", "attach", "message_id", "status", "creation"],
+		fields=["name", "type", "content_type", "message", "attach", "message_id", "status", "creation", "from", "profile_name"],
 		order_by="creation asc",
 	)
+
+
+@frappe.whitelist()
+def mark_conversation_read(conversation):
+	"""Called when an operator opens a conversation (or it's the one already open
+	when a new realtime update lands) -- clears the unread badge set by
+	client/conversation.py on the last inbound message. update_modified=False:
+	WhatsApp Conversation has track_changes=1, and this fires on every open, not
+	just meaningful edits."""
+	frappe.db.set_value("WhatsApp Conversation", conversation, "is_unread", 0, update_modified=False)
 
 
 @frappe.whitelist()

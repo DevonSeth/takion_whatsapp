@@ -220,12 +220,19 @@ after_migrate = ["takion_whatsapp.client.setup.after_migrate"]
 # introducing a second cadence. Every 5 minutes, not "all" (v16's ~60s tick is
 # too frequent for checks this cheap-but-not-free). See client/sla.py's,
 # client/broadcast.py's and client/segments.py's module docstrings.
+#
+# Entrega 12 ("Grupos"): reconcile_pending_groups is the safety net for a
+# WhatsApp Group whose create-confirmation webhook never arrives (Meta retries
+# webhook delivery for up to 7 days, so anything still Pendente needs an
+# active check, not just passive waiting) -- same cron, no new cadence, per
+# the user's explicit call (see takion_whatsapp_grupos_decisions memory).
 scheduler_events = {
 	"cron": {
 		"*/5 * * * *": [
 			"takion_whatsapp.client.sla.check_sla",
 			"takion_whatsapp.client.broadcast.process_pending_batches",
 			"takion_whatsapp.client.segments.refresh_dynamic_segments",
+			"takion_whatsapp.client.groups.reconcile_pending_groups",
 		],
 	},
 }
@@ -250,10 +257,17 @@ scheduler_events = {
 # WhatsAppRecipientListMixin fixes a real persistence bug in
 # import_list_from_doctype() that would otherwise break dynamic segments
 # (client/segments.py).
+#
+# Entrega 12 ("Grupos"): WhatsAppMessageGroupSendMixin patches the one gap in
+# reusing WhatsAppMessage.send_outgoing() unmodified for a group send --
+# recipient_type: "group" is never set there (see client/groups.py's mixin
+# docstring for why notify() specifically, not send_outgoing(), is the
+# override point).
 extend_doctype_class = {
 	"Lead": "takion_whatsapp.client.pipeline.LeadMixin",
 	"Bulk WhatsApp Message": "takion_whatsapp.client.broadcast.BulkWhatsAppMessageMixin",
 	"WhatsApp Recipient List": "takion_whatsapp.client.segments.WhatsAppRecipientListMixin",
+	"WhatsApp Message": "takion_whatsapp.client.groups.WhatsAppMessageGroupSendMixin",
 }
 
 # Overriding Methods

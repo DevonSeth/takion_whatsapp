@@ -1,0 +1,171 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "creation": "2026-07-30 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "channel",
+  "subject",
+  "description",
+  "join_approval_mode",
+  "column_break_1",
+  "group_id",
+  "invite_link",
+  "total_participant_count",
+  "status_section",
+  "status",
+  "error_message",
+  "column_break_2",
+  "pending_request_id",
+  "pending_update_request_id",
+  "last_reconciled_at",
+  "participants_section",
+  "participants"
+ ],
+ "fields": [
+  {
+   "fieldname": "channel",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Channel",
+   "options": "WhatsApp Channel",
+   "reqd": 1
+  },
+  {
+   "description": "Sent to Meta as-is on creation (≤128 chars, enforced in client/groups.py::create_group before the API call, not here) -- editable later via update_group, but a settings-update edit is ALSO asynchronous (see join_approval_mode's note), so this field can briefly lag the real value while pending_update_request_id is set.",
+   "fieldname": "subject",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Assunto",
+   "reqd": 1
+  },
+  {
+   "description": "≤2048 chars (enforced in client/groups.py, not here).",
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Descrição"
+  },
+  {
+   "default": "auto_approve",
+   "description": "Valores idênticos aos da API da Meta (não traduzidos), de propósito -- client/groups.py os envia direto, sem mapeamento. Segundo a documentação da Meta, este campo NÃO aparece como editável no endpoint de atualização (POST /<GROUP_ID>) -- parece fixo após a criação do grupo.",
+   "fieldname": "join_approval_mode",
+   "fieldtype": "Select",
+   "label": "Aprovação de entrada",
+   "options": "auto_approve\napproval_required",
+   "read_only_depends_on": "eval:doc.group_id",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "ID real do grupo na Meta -- só existe depois que a criação (assíncrona) é confirmada. Enquanto vazio, o registro ainda está Pendente.",
+   "fieldname": "group_id",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Group ID (Meta)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "invite_link",
+   "fieldtype": "Data",
+   "label": "Link de convite",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "description": "Limite real da Groups API: 8 participantes por grupo (não é o limite de 1024 do WhatsApp comum) -- só informativo aqui, já que não existe endpoint pra NÓS adicionarmos participantes (entram só via link de convite).",
+   "fieldname": "total_participant_count",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Participantes",
+   "read_only": 1
+  },
+  {
+   "fieldname": "status_section",
+   "fieldtype": "Section Break",
+   "label": "Status"
+  },
+  {
+   "default": "Pendente",
+   "description": "Criação/edição de grupo são assíncronas na Meta -- a confirmação real chega depois via webhook (group_lifecycle_update/group_settings_update) OU pela reconciliação periódica (client/groups.py::reconcile_pending_groups, mesmo cron de 5min desde a Entrega 9). Nunca setado diretamente pelo operador.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Pendente\nAtivo\nSuspenso\nFalhou\nExcluído",
+   "read_only": 1
+  },
+  {
+   "depends_on": "eval:doc.status==\"Falhou\"",
+   "fieldname": "error_message",
+   "fieldtype": "Small Text",
+   "label": "Erro",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "request_id devolvido pelo POST .../groups (criação) -- correlaciona a confirmação assíncrona quando ela chega via webhook. Limpo quando o grupo é confirmado (Ativo) ou falha.",
+   "fieldname": "pending_request_id",
+   "fieldtype": "Data",
+   "label": "Request ID (criação)",
+   "read_only": 1
+  },
+  {
+   "description": "Mesma lógica de pending_request_id, para uma edição (subject/description) em andamento -- o grupo continua Ativo e utilizável durante a edição, só este campo marca que uma confirmação ainda não chegou.",
+   "fieldname": "pending_update_request_id",
+   "fieldtype": "Data",
+   "label": "Request ID (edição)",
+   "read_only": 1
+  },
+  {
+   "description": "Último GET /<GROUP_ID> bem-sucedido (webhook recebido OU reconciliação periódica) -- não é a última tentativa, só a última confirmação real.",
+   "fieldname": "last_reconciled_at",
+   "fieldtype": "Datetime",
+   "label": "Última reconciliação",
+   "read_only": 1
+  },
+  {
+   "fieldname": "participants_section",
+   "fieldtype": "Section Break",
+   "label": "Participantes"
+  },
+  {
+   "fieldname": "participants",
+   "fieldtype": "Table",
+   "options": "WhatsApp Group Participant"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-07-30 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Takion WhatsApp",
+ "name": "WhatsApp Group",
+ "naming_rule": "Random",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

@@ -47,7 +47,7 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 	constructor(page) {
 		this.page = page;
 		this.current_conversation = null;
-		this.filters = { status: [], tag: '', assigned_to: '' };
+		this.filters = { status: [], tag: '', assigned_to: '', unread_only: false };
 		this.is_system_manager = frappe.user.has_role('System Manager');
 
 		// Audio: real waveforms per message bubble (destroyed/recreated on each
@@ -113,13 +113,32 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 			   overestimates. resize_layout() always overrides this with a real measurement. */
 			.whatsapp-inbox { display: flex; height: calc(100vh - 180px); border: 1px solid var(--border-color); border-radius: var(--border-radius); overflow: hidden; }
 			.wa-conversations { width: 300px; border-right: 1px solid var(--border-color); display: flex; flex-direction: column; overflow: hidden; }
-			.wa-conversations-filters { padding: 8px; display: flex; gap: 4px; border-bottom: 1px solid var(--border-color); }
+			.wa-conversations-actions { padding: 8px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; border-bottom: 1px solid var(--border-color); }
+			.wa-action-btn { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 2px; line-height: 1.2; }
+			.wa-action-icon { font-size: 17px; }
+			.wa-action-label { font-size: 11px; }
+			/* Sandbox is dev-only tooling, not a real inbox action -- deliberately
+			   de-emphasized (smaller, own row) rather than given equal weight to
+			   Contato/Conversa/Grupo in the 3-column grid above. */
+			.wa-action-btn-minor { grid-column: 1 / -1; flex-direction: row; padding: 3px; opacity: .7; }
+			.wa-action-btn-minor .wa-action-icon { font-size: 13px; }
+			.wa-action-btn-minor .wa-action-label { font-size: 11px; }
+			.wa-conversations-filters { padding: 8px; display: flex; flex-direction: column; gap: 6px; border-bottom: 1px solid var(--border-color); }
+			.wa-filters-row { display: flex; gap: 4px; }
+			.wa-filters-row > * { flex: 1; min-width: 0; }
 			.wa-conversations-filters select, .wa-conversations-filters input { font-size: 12px; padding: 2px 4px; }
+			.wa-unread-toggle.active { background: var(--blue-100, #d3e8fb); border-color: var(--blue-500, #2490ef); color: var(--blue-700, #1a5490); }
 			.wa-conversations-list { flex: 1; overflow-y: auto; }
 			.wa-conversation-item { padding: 10px 12px; border-bottom: 1px solid var(--border-color); cursor: pointer; }
 			.wa-conversation-item:hover { background: var(--fg-hover-color); }
 			.wa-conversation-item.active { background: var(--fg-hover-color); }
 			.wa-conversation-title { font-weight: 600; display: flex; justify-content: space-between; }
+			/* Read conversations are visually quieter than unread ones -- same
+			   convention as WhatsApp Web's own bold-until-opened list item, just in
+			   neutral colors (see the standing no-WhatsApp-colors rule). */
+			.wa-conversation-item:not(.unread) .wa-conversation-title,
+			.wa-conversation-item:not(.unread) .wa-conversation-preview { font-weight: 400; color: var(--text-muted); }
+			.wa-unread-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--blue-500, #2490ef); margin-left: 6px; flex-shrink: 0; }
 			.wa-conversation-time { font-weight: 400; font-size: 11px; color: var(--text-muted); }
 			.wa-conversation-preview { font-size: 12px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 			.wa-conversation-meta { margin-top: 4px; display: flex; gap: 4px; align-items: center; }
@@ -135,6 +154,9 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 			.wa-bubble-text { white-space: pre-wrap; word-break: break-word; font-size: 13px; }
 			.wa-bubble-time { text-align: right; font-size: 10px; color: var(--text-muted); margin-top: 2px; }
 			.wa-bubble-time .wa-check { margin-left: 3px; }
+			/* Placeholder color only, same "no WhatsApp brand colors" rule as the rest
+			   of this file -- just needs to read as "not the message body" at a glance. */
+			.wa-bubble-sender { font-size: 11px; font-weight: 600; color: var(--blue-500, #2490ef); margin-bottom: 2px; }
 			.wa-check-read { color: var(--blue-500, #2490ef); }
 			.wa-audio-bubble { display: flex; align-items: center; gap: 8px; min-width: 220px; }
 			.wa-audio-play { width: 30px; height: 30px; border-radius: 50%; background: var(--gray-500); color: #fff; border: none; flex-shrink: 0; }
@@ -243,7 +265,10 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 			.wa-sandbox-banner button { margin-left: 6px; }
 			.wa-emoji-picker-wrap { position: relative; }
 			.wa-emoji-picker {
-				position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 10;
+				/* Anchored by its RIGHT edge (opens leftward), not left — the emoji
+				   button sits near the right side of the compose row, so a left-anchored
+				   260px-wide picker ran off the right edge of the screen entirely. */
+				position: absolute; bottom: calc(100% + 6px); right: 0; z-index: 10;
 				background: var(--card-bg, #fff); border: 1px solid var(--border-color);
 				border-radius: var(--border-radius); width: 260px; max-height: 260px;
 				box-shadow: var(--shadow-sm, 0 1px 3px rgba(0,0,0,.15));
@@ -278,26 +303,42 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 		this.page.body.html(`
 			<div class="whatsapp-inbox">
 				<div class="wa-conversations">
-					<div class="wa-conversations-toolbar" style="padding: 8px; display: flex; gap: 4px; border-bottom: 1px solid var(--border-color);">
-						<button class="btn btn-default btn-sm wa-new-contact" style="flex:1;">+ Novo Contato</button>
-						<button class="btn btn-default btn-sm wa-new-conversation" style="flex:1;">+ Nova Conversa</button>
-						${this.is_system_manager ? '<button class="btn btn-default btn-sm wa-open-sandbox" style="flex:1;" title="Conversa de teste, sem depender do número real da Meta">🧪 Sandbox</button>' : ''}
-					</div>
 					<div class="wa-conversations-search">
 						<input class="form-control form-control-sm wa-global-search-input" placeholder="🔍 Buscar em todas as conversas">
 					</div>
+					<div class="wa-conversations-actions">
+						<button class="btn btn-default wa-action-btn wa-new-contact" title="Novo Contato">
+							<span class="wa-action-icon">👤</span><span class="wa-action-label">Contato</span>
+						</button>
+						<button class="btn btn-default wa-action-btn wa-new-conversation" title="Nova Conversa">
+							<span class="wa-action-icon">💬</span><span class="wa-action-label">Conversa</span>
+						</button>
+						<button class="btn btn-default wa-action-btn wa-new-group" title="Novo Grupo">
+							<span class="wa-action-icon">👥</span><span class="wa-action-label">Grupo</span>
+						</button>
+						${this.is_system_manager ? `
+							<button class="btn btn-default wa-action-btn wa-action-btn-minor wa-open-sandbox" title="Conversa de teste, sem depender do número real da Meta">
+								<span class="wa-action-icon">🧪</span><span class="wa-action-label">Sandbox</span>
+							</button>
+						` : ''}
+					</div>
 					<div class="wa-conversations-filters">
-						<div class="wa-status-filter">
-							<button type="button" class="btn btn-default btn-sm wa-status-filter-toggle">Status: Todos</button>
-							<div class="wa-status-filter-menu" style="display:none;">
-								<label class="wa-status-filter-option"><input type="checkbox" value="Novo"> Novo</label>
-								<label class="wa-status-filter-option"><input type="checkbox" value="Em andamento"> Em andamento</label>
-								<label class="wa-status-filter-option"><input type="checkbox" value="Aguardando cliente"> Aguardando cliente</label>
-								<label class="wa-status-filter-option"><input type="checkbox" value="Resolvido"> Resolvido</label>
+						<div class="wa-filters-row">
+							<div class="wa-status-filter">
+								<button type="button" class="btn btn-default btn-sm wa-status-filter-toggle">Status: Todos</button>
+								<div class="wa-status-filter-menu" style="display:none;">
+									<label class="wa-status-filter-option"><input type="checkbox" value="Novo"> Novo</label>
+									<label class="wa-status-filter-option"><input type="checkbox" value="Em andamento"> Em andamento</label>
+									<label class="wa-status-filter-option"><input type="checkbox" value="Aguardando cliente"> Aguardando cliente</label>
+									<label class="wa-status-filter-option"><input type="checkbox" value="Resolvido"> Resolvido</label>
+								</div>
 							</div>
+							<button type="button" class="btn btn-default btn-sm wa-unread-toggle" title="Mostrar só não lidas">● Não lidas</button>
 						</div>
-						<input class="form-control wa-filter-tag" placeholder="Tag">
-						<input class="form-control wa-filter-agent" placeholder="Agente">
+						<div class="wa-filters-row">
+							<input class="form-control form-control-sm wa-filter-tag" placeholder="Tag">
+							<input class="form-control form-control-sm wa-filter-agent" placeholder="Agente">
+						</div>
 					</div>
 					<div class="wa-conversations-list"></div>
 				</div>
@@ -321,6 +362,7 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 							${this.is_system_manager ? `
 								<button class="btn btn-default btn-xs wa-sandbox-simulate">Simular recebimento</button>
 								<button class="btn btn-default btn-xs wa-sandbox-clear">Limpar mensagens de teste</button>
+								<button class="btn btn-default btn-xs wa-sandbox-group">🧪 Testar Grupo</button>
 							` : ''}
 						</div>
 					</div>
@@ -386,6 +428,11 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 			this.update_status_filter_label();
 			this.refresh_conversations();
 		});
+		main.on('click', '.wa-unread-toggle', (e) => {
+			this.filters.unread_only = !this.filters.unread_only;
+			$(e.currentTarget).toggleClass('active', this.filters.unread_only);
+			this.refresh_conversations();
+		});
 		main.on('click', '.wa-compose-emoji', (e) => {
 			e.stopPropagation();
 			this.toggle_emoji_picker();
@@ -414,6 +461,14 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 
 		main.on('click', '.wa-new-contact', () => this.open_new_contact_dialog());
 		main.on('click', '.wa-new-conversation', () => this.open_new_conversation_dialog());
+		main.on('click', '.wa-new-group', () => this.open_new_group_dialog());
+		main.on('click', '.wa-group-refresh', () => this.refresh_group_panel());
+		main.on('click', '.wa-group-edit', () => this.open_edit_group_dialog());
+		main.on('click', '.wa-group-invite-copy', () => this.copy_group_invite_link());
+		main.on('click', '.wa-group-invite-reset', () => this.reset_group_invite_link());
+		main.on('click', '.wa-group-participant-remove', (e) => this.remove_group_participant($(e.currentTarget).data('wa-id')));
+		main.on('click', '.wa-group-join-approve', (e) => this.resolve_group_join_request($(e.currentTarget).data('id'), true));
+		main.on('click', '.wa-group-join-reject', (e) => this.resolve_group_join_request($(e.currentTarget).data('id'), false));
 		main.on('click', '.wa-bubble-img', (e) => {
 			e.stopPropagation(); // a gallery thumb inside .wa-media-section-toggle must only zoom, not also open the full browser
 			this.open_image_lightbox(e.currentTarget.src);
@@ -424,6 +479,7 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 		main.on('click', '.wa-open-sandbox', () => this.open_sandbox());
 		main.on('click', '.wa-sandbox-simulate', () => this.open_simulate_incoming_dialog());
 		main.on('click', '.wa-sandbox-clear', () => this.clear_sandbox_messages());
+		main.on('click', '.wa-sandbox-group', () => this.open_group_sandbox_dialog());
 
 		main.on('input', '.wa-global-search-input', frappe.utils.debounce((e) => {
 			this.run_global_search(e.target.value.trim());
@@ -554,11 +610,22 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 
 	setup_realtime() {
 		frappe.realtime.on('whatsapp_inbox_update', (data) => {
-			this.refresh_conversations();
-			if (data.conversation && data.conversation === this.current_conversation) {
+			const is_current = data.conversation && data.conversation === this.current_conversation;
+			if (is_current) {
 				this.load_thread(this.current_conversation);
 			}
+			// The new message just marked this conversation unread server-side even
+			// though the operator may be actively looking at it right now --
+			// immediately mark it read again instead of leaving a stale unread badge
+			// on an already-open conversation. refresh_conversations() waits for that
+			// to land first so it doesn't briefly show the badge and flip it back off.
+			const marked_read = is_current ? this.mark_conversation_read(this.current_conversation) : Promise.resolve();
+			marked_read.then(() => this.refresh_conversations());
 		});
+	}
+
+	mark_conversation_read(name) {
+		return frappe.call({ method: 'takion_whatsapp.client.inbox.mark_conversation_read', args: { conversation: name } });
 	}
 
 	update_status_filter_label() {
@@ -636,6 +703,128 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 		});
 	}
 
+	// Dedicated test harness for Entrega 12 (Grupos): no OBA exists in any Takion
+	// environment yet (see takion_whatsapp_grupos_decisions memory), so the real
+	// Meta Groups API is unreachable -- this drives client/sandbox.py's group
+	// simulation functions, which exercise the exact same state-mutation code
+	// (client/groups.py::reconcile_group) real webhooks would, minus the live
+	// HTTP call. Manages one sandbox group at a time (create -> confirm ->
+	// join/leave participants -> simulate an incoming message from one of them),
+	// re-rendering itself after every action instead of closing.
+	open_group_sandbox_dialog() {
+		const dialog = new frappe.ui.Dialog({
+			title: __('Testar Grupos (sandbox)'),
+			fields: [{ fieldname: 'body', fieldtype: 'HTML' }],
+		});
+		const $body = () => $(dialog.fields_dict.body.wrapper);
+
+		const refresh = () => {
+			frappe.call({ method: 'takion_whatsapp.client.sandbox.get_sandbox_group' }).then((r) => render(r.message));
+		};
+
+		const render = (group) => {
+			if (!group) {
+				$body().html('<button class="btn btn-default btn-sm wa-gs-create">Criar grupo de teste</button>');
+				$body().find('.wa-gs-create').on('click', () => {
+					frappe.call({ method: 'takion_whatsapp.client.sandbox.create_sandbox_group' }).then(refresh);
+				});
+				return;
+			}
+
+			if (!group.group_id) {
+				$body().html(`
+					<div>${frappe.utils.escape_html(group.subject)} — <em>Pendente</em></div>
+					<p class="text-muted small">Criação assíncrona (mesmo comportamento real da Meta) — simule a confirmação abaixo.</p>
+					<button class="btn btn-default btn-sm wa-gs-confirm">Simular confirmação da Meta</button>
+					<button class="btn btn-default btn-sm wa-gs-clear">Limpar</button>
+				`);
+				$body().find('.wa-gs-confirm').on('click', () => {
+					frappe.call({ method: 'takion_whatsapp.client.sandbox.simulate_group_created', args: { group: group.name } }).then(refresh);
+				});
+				$body().find('.wa-gs-clear').on('click', () => {
+					frappe.call({ method: 'takion_whatsapp.client.sandbox.clear_sandbox_groups' }).then(refresh);
+				});
+				return;
+			}
+
+			$body().html(`
+				<div>${frappe.utils.escape_html(group.subject)} — <em>${frappe.utils.escape_html(group.status)}</em></div>
+				<div class="mt-2">
+					${group.participants.map((p) => `
+						<span class="wa-tag-chip">${frappe.utils.escape_html(p.profile_name || p.wa_id)}<span class="remove wa-gs-leave" data-wa-id="${frappe.utils.escape_html(p.wa_id)}">×</span></span>
+					`).join('') || '<span class="text-muted small">Nenhum participante ainda</span>'}
+				</div>
+				<div class="mt-2">
+					<input class="form-control form-control-sm wa-gs-wa-id" placeholder="wa_id (ex: 5511999998888)" style="display:inline-block;width:45%;">
+					<input class="form-control form-control-sm wa-gs-name" placeholder="Nome (opcional)" style="display:inline-block;width:45%;">
+					<button class="btn btn-default btn-xs mt-1 wa-gs-join">+ Simular entrada</button>
+				</div>
+				${group.participants.length ? `
+					<div class="mt-3">
+						<select class="form-control form-control-sm wa-gs-sender" style="display:inline-block;width:45%;">
+							${group.participants.map((p) => `<option value="${frappe.utils.escape_html(p.wa_id)}" data-profile-name="${frappe.utils.escape_html(p.profile_name || '')}">${frappe.utils.escape_html(p.profile_name || p.wa_id)}</option>`).join('')}
+						</select>
+						<input class="form-control form-control-sm wa-gs-message" placeholder="Mensagem" style="display:inline-block;width:45%;">
+						<button class="btn btn-default btn-xs mt-1 wa-gs-send">Simular mensagem recebida</button>
+					</div>
+				` : ''}
+				<div class="mt-3">
+					<button class="btn btn-default btn-xs wa-gs-open">Abrir conversa</button>
+					<button class="btn btn-danger btn-xs wa-gs-clear">Limpar grupo de teste</button>
+				</div>
+			`);
+
+			$body().find('.wa-gs-join').on('click', () => {
+				const wa_id = $body().find('.wa-gs-wa-id').val().trim();
+				if (!wa_id) return;
+				frappe.call({
+					method: 'takion_whatsapp.client.sandbox.simulate_group_participant_join',
+					args: { group: group.name, wa_id, profile_name: $body().find('.wa-gs-name').val().trim() || null },
+				}).then(refresh);
+			});
+			$body().find('.wa-gs-leave').on('click', (e) => {
+				frappe.call({
+					method: 'takion_whatsapp.client.sandbox.simulate_group_participant_leave',
+					args: { group: group.name, wa_id: $(e.currentTarget).data('wa-id') },
+				}).then(refresh);
+			});
+			$body().find('.wa-gs-send').on('click', () => {
+				const $sender = $body().find('.wa-gs-sender');
+				const wa_id = $sender.val();
+				const profile_name = $sender.find('option:selected').data('profile-name') || null;
+				const message = $body().find('.wa-gs-message').val().trim();
+				if (!wa_id || !message) return;
+				frappe.call({
+					method: 'takion_whatsapp.client.sandbox.simulate_incoming_group_message',
+					args: { group: group.name, wa_id, message, profile_name },
+				}).then(() => {
+					if (this.current_conversation) this.load_thread(this.current_conversation);
+					this.refresh_conversations();
+					refresh();
+				});
+			});
+			$body().find('.wa-gs-open').on('click', () => {
+				frappe.db.get_value('WhatsApp Conversation', { whatsapp_group: group.name }, 'name').then((r) => {
+					if (r.message && r.message.name) {
+						dialog.hide();
+						this.open_conversation(r.message.name);
+					}
+				});
+			});
+			$body().find('.wa-gs-clear').on('click', () => {
+				frappe.confirm(__('Apagar este grupo de teste?'), () => {
+					frappe.call({ method: 'takion_whatsapp.client.sandbox.clear_sandbox_groups' }).then(() => {
+						this.refresh_conversations();
+						refresh();
+					});
+				});
+			});
+		};
+
+		dialog.show();
+		refresh();
+	}
+
 	refresh_conversations() {
 		frappe.call({
 			method: 'takion_whatsapp.client.inbox.get_conversations',
@@ -655,15 +844,16 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 			const preview = frappe.utils.escape_html(c.last_message_preview || '');
 			const when = c.last_message_at ? frappe.datetime.str_to_user(c.last_message_at, true) : '';
 			const active = c.name === this.current_conversation ? ' active' : '';
+			const unread = c.is_unread ? ' unread' : '';
 			const direction_icon = c.last_direction === 'Outbound' ? '↗' : '↙';
 			const tags = (c._user_tags || '').split(',').map((t) => t.trim()).filter(Boolean);
 			let assignees = [];
 			try { assignees = JSON.parse(c._assign || '[]'); } catch (e) { assignees = []; }
 
 			return `
-				<div class="wa-conversation-item${active}" data-name="${c.name}">
+				<div class="wa-conversation-item${active}${unread}" data-name="${c.name}">
 					<div class="wa-conversation-title">
-						<span>${title}</span>
+						<span>${c.whatsapp_group ? '<span title="Grupo">👥</span> ' : ''}${title}${c.is_unread ? '<span class="wa-unread-dot" title="Não lida"></span>' : ''}</span>
 						<span class="wa-conversation-time">${when}</span>
 					</div>
 					<div class="wa-conversation-preview">${direction_icon} ${preview}</div>
@@ -700,6 +890,11 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 		this.abort_compose_recording();
 		this.discard_media();
 		this.current_conversation = name;
+		// Reset eagerly (not just after load_contact_panel resolves) so a stray
+		// render_message() firing mid-switch (e.g. a fast realtime update) never
+		// paints the PREVIOUS conversation's group/1:1 mode onto the new one.
+		this.is_group_conversation = false;
+		this.current_group_panel = null;
 		this.pending_jump_message = jump_to_message || null;
 		this.thread_search_query = '';
 		this.thread_search_matches = [];
@@ -707,13 +902,25 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 		this.page.body.find('.wa-thread-search-bar').hide();
 		this.page.body.find('.wa-thread-search-input').val('');
 		this.page.body.find('.wa-conversation-item').removeClass('active');
-		this.page.body.find(`.wa-conversation-item[data-name="${name}"]`).addClass('active');
+		this.page.body.find(`.wa-conversation-item[data-name="${name}"]`)
+			.addClass('active')
+			.removeClass('unread')
+			.find('.wa-unread-dot').remove();
+		this.mark_conversation_read(name).then(() => this.refresh_conversations());
 		this.page.body.find('.wa-thread-compose').show();
 		this.page.body.find('.wa-compose-input').val('');
 		this.autosize_compose_input();
 		this.update_compose_buttons();
 
-		this.load_thread(name);
+		// Gates is_group_conversation (read by render_message's sender-label logic)
+		// BEFORE the thread itself renders -- load_contact_panel below fetches the
+		// same conversation doc again for its own (larger) panel payload, but
+		// that call resolving later/first is not reliable enough to gate the
+		// very first paint's sender labels on, and this lookup is cheap.
+		frappe.db.get_value('WhatsApp Conversation', name, 'whatsapp_group').then((r) => {
+			this.is_group_conversation = !!(r.message && r.message.whatsapp_group);
+			this.load_thread(name);
+		});
 		this.load_contact_panel(name);
 	}
 
@@ -906,6 +1113,12 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 		const out = msg.type === 'Outgoing';
 		const time = frappe.datetime.str_to_user(msg.creation, true);
 		const check = out ? this.render_check(msg.status) : '';
+		// Group threads can have several distinct senders in one conversation
+		// (unlike 1:1, where "who sent this" is never ambiguous) -- labeled only
+		// for inbound bubbles, since every outgoing bubble is always us.
+		const sender = (!out && this.is_group_conversation)
+			? `<div class="wa-bubble-sender">${frappe.utils.escape_html(msg.profile_name || msg.from || '')}</div>`
+			: '';
 		const body = msg.content_type === 'audio'
 			? this.render_audio_bubble(msg)
 			: this.render_generic_bubble(msg);
@@ -913,6 +1126,7 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 		return `
 			<div class="wa-bubble-row ${out ? 'out' : 'in'}" data-message="${frappe.utils.escape_html(msg.name)}">
 				<div class="wa-bubble">
+					${sender}
 					${body}
 					<div class="wa-bubble-time">${time}${check}</div>
 				</div>
@@ -1382,7 +1596,21 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 
 	load_contact_panel(name) {
 		frappe.db.get_doc('WhatsApp Conversation', name).then((conversation) => {
+			this.is_group_conversation = !!conversation.whatsapp_group;
 			this.page.body.find('.wa-sandbox-banner').toggle(conversation.phone_number === SANDBOX_PHONE_NUMBER);
+
+			if (conversation.whatsapp_group) {
+				frappe.call({
+					method: 'takion_whatsapp.client.groups.get_group_panel_data',
+					args: { conversation: name },
+				}).then((r) => {
+					this.current_group_panel = r.message;
+					this.render_thread_group_chip(r.message);
+					this.render_group_panel(r.message);
+				});
+				return;
+			}
+
 			const media_call = frappe.call({ method: 'takion_whatsapp.client.inbox.get_media_gallery', args: { conversation: name } });
 			const empty_gallery = { all: [], media: [], documents: [], links: [] };
 			if (conversation.contact) {
@@ -1460,6 +1688,7 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 	}
 
 	render_contact_panel(conversation, contact, roles, pipeline, gallery) {
+		this.page.body.find('.wa-contact-panel-header h5').text('Dados do contato');
 		const $panel = this.page.body.find('.wa-contact-panel-body');
 		const tags = (conversation._user_tags || '').split(',').map((t) => t.trim()).filter(Boolean);
 		let assignees = [];
@@ -1610,6 +1839,137 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 		`);
 	}
 
+	// Group counterpart of render_thread_contact_chip -- subject + participant
+	// count instead of a single contact's name/avatar/phone.
+	render_thread_group_chip(group) {
+		const count = group.total_participant_count || 0;
+		const status_note = group.status !== 'Ativo' ? ` <small class="text-muted">(${frappe.utils.escape_html(group.status)})</small>` : '';
+		this.page.body.find('.wa-thread-title').html(`
+			<span class="wa-thread-avatar"><span>👥</span></span>
+			<span>${frappe.utils.escape_html(group.subject || '')}${status_note}
+				<br><small class="text-muted">${count} participante${count === 1 ? '' : 's'}</small>
+			</span>
+		`);
+	}
+
+	// "Dados do grupo" -- replaces the normal contact panel body (same drawer,
+	// same toggle_contact_panel/close button) whenever the open conversation's
+	// whatsapp_group is set. Pendente/Falhou are shown plainly since creation/
+	// edits are asynchronous (see client/groups.py) -- the operator should never
+	// be left guessing why a brand-new group isn't sending yet.
+	render_group_panel(group) {
+		this.page.body.find('.wa-contact-panel-header h5').text('Dados do grupo');
+		const $panel = this.page.body.find('.wa-contact-panel-body');
+		const pending = group.status === 'Pendente';
+
+		$panel.html(`
+			<h5>${frappe.utils.escape_html(group.subject || '')} <span class="wa-group-refresh" title="Atualizar" style="cursor:pointer;font-size:13px;">🔄</span></h5>
+			${pending ? '<div class="indicator-pill blue">Pendente de confirmação da Meta</div>' : ''}
+			${group.status === 'Falhou' ? `<div class="indicator-pill red" title="${frappe.utils.escape_html(group.error_message || '')}">Falhou${group.error_message ? ': ' + frappe.utils.escape_html(group.error_message) : ''}</div>` : ''}
+			${group.description ? `<div class="wa-contact-field mt-2">${frappe.utils.escape_html(group.description)}</div>` : ''}
+			<div class="wa-contact-field">${group.total_participant_count || 0}/${group.max_participants} participantes</div>
+
+			${!pending ? '<div class="mt-2"><button class="btn btn-default btn-xs wa-group-edit">Editar assunto/descrição</button></div>' : ''}
+
+			${!pending ? `
+				<div class="mt-3"><label class="text-muted small">Link de convite</label><br>
+					${group.invite_link ? `
+						<div style="word-break:break-all;font-size:12px;">${frappe.utils.escape_html(group.invite_link)}</div>
+						<button class="btn btn-default btn-xs mt-1 wa-group-invite-copy">Copiar</button>
+					` : ''}
+					<button class="btn btn-default btn-xs mt-1 wa-group-invite-reset">${group.invite_link ? 'Resetar' : 'Gerar link'}</button>
+				</div>
+			` : ''}
+
+			${group.join_requests && group.join_requests.length ? `
+				<div class="mt-3"><label class="text-muted small">Solicitações de entrada</label><br>
+					${group.join_requests.map((jr) => `
+						<div class="wa-role-chip" style="display:block;">
+							${frappe.utils.escape_html(jr.wa_id || jr.id || '')}
+							<span class="wa-group-join-approve" data-id="${frappe.utils.escape_html(jr.id || jr.request_id || '')}" title="Aprovar" style="cursor:pointer;color:var(--green-500,#2e7d32);margin-left:6px;">✓</span>
+							<span class="wa-group-join-reject" data-id="${frappe.utils.escape_html(jr.id || jr.request_id || '')}" title="Rejeitar" style="cursor:pointer;color:var(--red-500,#c62828);margin-left:4px;">✕</span>
+						</div>
+					`).join('')}
+				</div>
+			` : ''}
+
+			<div class="mt-3"><label class="text-muted small">Participantes (${group.participants.length})</label><br>
+				${group.participants.map((p) => `
+					<div class="wa-role-chip" style="display:block;">
+						${frappe.utils.escape_html(p.profile_name || p.phone_number || p.wa_id || '')}
+						<span class="wa-group-participant-remove remove" data-wa-id="${frappe.utils.escape_html(p.wa_id)}" title="Remover">×</span>
+					</div>
+				`).join('') || '<div class="text-muted small">Nenhum participante ainda</div>'}
+			</div>
+		`);
+	}
+
+	refresh_group_panel() {
+		if (!this.current_group_panel) return;
+		frappe.call({
+			method: 'takion_whatsapp.client.groups.refresh_group',
+			args: { name: this.current_group_panel.name },
+		}).then(() => this.load_contact_panel(this.current_conversation));
+	}
+
+	open_edit_group_dialog() {
+		const group = this.current_group_panel;
+		if (!group) return;
+		const dialog = new frappe.ui.Dialog({
+			title: 'Editar grupo',
+			fields: [
+				{ fieldname: 'subject', label: 'Assunto', fieldtype: 'Data', reqd: 1, default: group.subject },
+				{ fieldname: 'description', label: 'Descrição', fieldtype: 'Small Text', default: group.description },
+			],
+			primary_action_label: 'Salvar',
+			primary_action: (values) => {
+				frappe.call({
+					method: 'takion_whatsapp.client.groups.update_group',
+					args: { name: group.name, subject: values.subject, description: values.description },
+				}).then(() => {
+					dialog.hide();
+					this.load_contact_panel(this.current_conversation);
+					this.refresh_conversations();
+				});
+			},
+		});
+		dialog.show();
+	}
+
+	copy_group_invite_link() {
+		if (this.current_group_panel && this.current_group_panel.invite_link) {
+			frappe.utils.copy_to_clipboard(this.current_group_panel.invite_link);
+		}
+	}
+
+	reset_group_invite_link() {
+		if (!this.current_group_panel) return;
+		frappe.call({
+			method: 'takion_whatsapp.client.groups.reset_invite_link',
+			args: { name: this.current_group_panel.name },
+		}).then(() => this.load_contact_panel(this.current_conversation));
+	}
+
+	remove_group_participant(wa_id) {
+		const group = this.current_group_panel;
+		if (!group) return;
+		frappe.confirm(__('Remover este participante do grupo?'), () => {
+			frappe.call({
+				method: 'takion_whatsapp.client.groups.remove_participants',
+				args: { name: group.name, wa_ids: [wa_id] },
+			}).then(() => this.load_contact_panel(this.current_conversation));
+		});
+	}
+
+	resolve_group_join_request(id, approve) {
+		const group = this.current_group_panel;
+		if (!group) return;
+		frappe.call({
+			method: `takion_whatsapp.client.groups.${approve ? 'approve_join_requests' : 'reject_join_requests'}`,
+			args: { name: group.name, join_request_ids: [id] },
+		}).then(() => this.load_contact_panel(this.current_conversation));
+	}
+
 	toggle_contact_panel(force) {
 		const $panel = this.page.body.find('.wa-contact-panel');
 		const show = force !== undefined ? force : !$panel.is(':visible');
@@ -1708,6 +2068,44 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 			dialog.fields_dict.channel.df.onchange = refresh_templates;
 			dialog.show();
 			refresh_templates();
+		});
+	}
+
+	// Group creation is asynchronous on Meta's side (see client/groups.py's module
+	// docstring) -- this dialog only submits the request; the group itself only
+	// shows up in the conversation list once client/groups.py confirms it (webhook
+	// or the periodic safety-net sweep), via the same whatsapp_inbox_update
+	// realtime event every other flow already listens for.
+	open_new_group_dialog() {
+		frappe.call({ method: 'frappe.client.get_list', args: { doctype: 'WhatsApp Channel', fields: ['name'] } }).then((r) => {
+			const channels = r.message || [];
+			const dialog = new frappe.ui.Dialog({
+				title: 'Novo Grupo',
+				fields: [
+					{ fieldname: 'channel', label: 'Canal', fieldtype: 'Select', reqd: 1, options: channels.map((c) => c.name).join('\n'), default: channels[0] && channels[0].name },
+					{ fieldname: 'subject', label: 'Assunto', fieldtype: 'Data', reqd: 1 },
+					{ fieldname: 'description', label: 'Descrição', fieldtype: 'Small Text' },
+					{
+						fieldname: 'join_approval_mode', label: 'Aprovação de entrada', fieldtype: 'Select', reqd: 1,
+						options: 'auto_approve\napproval_required', default: 'auto_approve',
+						description: 'Não pode ser alterado depois da criação.',
+					},
+				],
+				primary_action_label: 'Criar',
+				primary_action: (values) => {
+					frappe.call({
+						method: 'takion_whatsapp.client.groups.create_group',
+						args: values,
+					}).then(() => {
+						dialog.hide();
+						frappe.show_alert({
+							message: __('Grupo em criação — a Meta confirma isso de forma assíncrona, pode levar alguns instantes até aparecer na lista.'),
+							indicator: 'blue',
+						});
+					});
+				},
+			});
+			dialog.show();
 		});
 	}
 

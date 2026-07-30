@@ -100,6 +100,22 @@ def extract_statuses(raw_body):
 		return []
 
 
+def extract_change(raw_body):
+	"""Pull the whole changes[0] object (field + value) out of a raw Meta payload --
+	used to detect the 4 WhatsApp Groups webhook types (group_lifecycle_update,
+	group_participants_update, group_settings_update, group_status_update), whose
+	`value` carries a `groups[]` array instead of `messages[]`/`statuses[]`, so
+	neither extract_messages nor extract_statuses fits."""
+	try:
+		data = json.loads(raw_body)
+		try:
+			return data["entry"][0]["changes"][0]
+		except KeyError:
+			return data["entry"]["changes"][0]
+	except (KeyError, IndexError, ValueError, TypeError):
+		return {}
+
+
 def extract_messages(raw_body):
 	"""Pull the messages[] array (inbound customer messages, incl. any `referral`
 	object from a Click-to-WhatsApp ad) out of a raw Meta payload. Outbound status

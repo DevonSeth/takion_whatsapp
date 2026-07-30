@@ -1,0 +1,60 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-07-30 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "wa_id",
+  "phone_number",
+  "profile_name",
+  "contact",
+  "joined_at"
+ ],
+ "fields": [
+  {
+   "description": "Raw participant id as reported by Meta (GET .../participants or the group_participants_update webhook) -- used verbatim, never normalized, since it identifies the participant within THIS group's API responses, not a conversation key of ours.",
+   "fieldname": "wa_id",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "WhatsApp ID"
+  },
+  {
+   "description": "Normalized (see takion_whatsapp.utils.normalize_phone_number) -- same dedup key 1:1 conversations use, so a group member who is already a Contact resolves onto the SAME Contact.",
+   "fieldname": "phone_number",
+   "fieldtype": "Data",
+   "label": "Phone Number"
+  },
+  {
+   "fieldname": "profile_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Profile Name"
+  },
+  {
+   "description": "Resolved through the same dedup pipeline as 1:1 conversations (client/contacts.py) -- optional, since a group member might never have messaged this business directly.",
+   "fieldname": "contact",
+   "fieldtype": "Link",
+   "label": "Contact",
+   "options": "Contact"
+  },
+  {
+   "fieldname": "joined_at",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Joined At"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-07-30 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Takion WhatsApp",
+ "name": "WhatsApp Group Participant",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

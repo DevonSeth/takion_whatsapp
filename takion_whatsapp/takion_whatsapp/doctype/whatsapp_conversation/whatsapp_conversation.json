@@ -7,6 +7,7 @@
  "engine": "InnoDB",
  "field_order": [
   "channel",
+  "whatsapp_group",
   "phone_number",
   "phone_number_display",
   "wa_id",
@@ -16,6 +17,7 @@
   "last_message_at",
   "last_message_preview",
   "last_direction",
+  "is_unread",
   "attribution_section",
   "ctwa_clid",
   "referral_source_type",
@@ -39,11 +41,20 @@
    "reqd": 1
   },
   {
-   "description": "Canonical/normalized number used to group messages into this conversation (Brazilian mobile numbers' ambiguous 9th digit stripped — see takion_whatsapp.utils.normalize_phone_number). Internal matching key only — not shown to agents, use phone_number_display for that, and wa_id for sending.",
+   "description": "Entrega 12 (Grupos): quando setado, esta conversa É a thread do grupo -- contact/phone_number/wa_id ficam irrelevantes (mesma convenção \"sem aba vazia\" do funil da Entrega 7), e o remetente de cada mensagem inbound é o participante que enviou, não este grupo.",
+   "fieldname": "whatsapp_group",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "WhatsApp Group",
+   "options": "WhatsApp Group"
+  },
+  {
+   "description": "Canonical/normalized number used to group messages into this conversation (Brazilian mobile numbers' ambiguous 9th digit stripped — see takion_whatsapp.utils.normalize_phone_number). Internal matching key only — not shown to agents, use phone_number_display for that, and wa_id for sending. Irrelevant/blank for a group conversation (see whatsapp_group).",
    "fieldname": "phone_number",
    "fieldtype": "Data",
    "label": "Phone Number",
-   "reqd": 1
+   "mandatory_depends_on": "eval:!doc.whatsapp_group"
   },
   {
    "description": "Human-facing number, always with the Brazilian 9th digit reinserted (every real BR mobile number has it — see takion_whatsapp.utils.format_phone_number_display). Derived from phone_number at creation, shown in the conversation list/thread.",
@@ -101,6 +112,16 @@
    "fieldtype": "Select",
    "label": "Last Direction",
    "options": "Inbound\nOutbound",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "description": "Set on every inbound message (client/conversation.py), cleared when an operator opens the conversation (client/inbox.py::mark_conversation_read) or replies. Independent of `status` -- a conversation can be \"Em andamento\" and still unread, or \"Resolvido\" and briefly unread again if the customer writes back.",
+   "fieldname": "is_unread",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Não lida",
    "read_only": 1
   },
   {
