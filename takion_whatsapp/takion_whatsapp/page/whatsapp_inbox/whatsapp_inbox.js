@@ -28,11 +28,27 @@ frappe.provide('takion_whatsapp');
 const WA_CONTEXT_ROLE_DOCTYPES = ['Customer', 'Supplier', 'Employee'];
 const WA_FUNNEL_DOCTYPES = ['Lead', 'Opportunity'];
 
+// Must match takion_whatsapp.client.sandbox.SANDBOX_PHONE_NUMBER — used purely
+// to recognize the sandbox conversation client-side (show/hide its banner),
+// never to gate any permission (the whitelisted sandbox methods re-check
+// System Manager + this same number server-side regardless of what the UI shows).
+const SANDBOX_PHONE_NUMBER = '000000000000';
+
+// Full Unicode emoji set (1914 emoji, 9 groups), vendored locally at
+// public/js/lib/emoji-data.json — trimmed from muan/unicode-emoji-json
+// (MIT), fetched lazily on first picker open, not embedded here. Plain
+// UTF-8 text either way (no image assets), so any of these already
+// send/render fine today via send_message with zero extra backend work.
+// Distinct from stickers (WebP image messages, a real gap — see
+// [[takion_whatsapp_feature_backlog]]).
+const WA_EMOJI_CATEGORY_ICONS = ['😀', '👋', '🐶', '🍔', '✈️', '⚽', '💡', '🔣', '🚩'];
+
 takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 	constructor(page) {
 		this.page = page;
 		this.current_conversation = null;
-		this.filters = { status: '', tag: '', assigned_to: '' };
+		this.filters = { status: [], tag: '', assigned_to: '' };
+		this.is_system_manager = frappe.user.has_role('System Manager');
 
 		// Audio: real waveforms per message bubble (destroyed/recreated on each
 		// thread render), plus recording/preview state for the operator's own
@@ -41,6 +57,9 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 		// "generic file to download".
 		this.waveforms = [];
 		this.MAX_RECORDING_SECONDS = 120;
+		// Meta's own limits (see WhatsApp Cloud API media reference) — checked
+		// client-side too so a too-large file never even reaches upload_file.
+		this.MEDIA_MAX_BYTES = { image: 5 * 1024 * 1024, video: 16 * 1024 * 1024, document: 100 * 1024 * 1024 };
 		this.record_wavesurfer = null;
 		this.record_plugin = null;
 		this.record_start = null;
@@ -65,11 +84,33 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 		this.bind_events();
 		this.setup_realtime();
 		this.refresh_conversations();
+
+		this.resize_layout();
+		// Namespaced + only ever bound once per page instance (this class is
+		// constructed once per session, same lifecycle as every other listener here).
+		$(window).on('resize.wa-inbox-layout', () => this.resize_layout());
+	}
+
+	// Measures the real space available below the widget's own top offset instead
+	// of guessing a fixed navbar/breadcrumb height — adapts to any zoom level,
+	// window size, or Frappe chrome height instead of leaving (or running out of)
+	// blank space below the compose bar.
+	resize_layout() {
+		const el = this.page.body.find('.whatsapp-inbox')[0];
+		if (!el) return;
+		const top = el.getBoundingClientRect().top;
+		const height = Math.max(400, window.innerHeight - top - 20);
+		el.style.height = height + 'px';
 	}
 
 	inject_styles() {
 		if ($('#whatsapp-inbox-styles').length) return;
 		$(`<style id="whatsapp-inbox-styles">
+			/* height: calc(100vh - 180px) fallback for the instant before JS measures the
+			   real available space (resize_layout()) — 180px is only a guess at how tall
+			   Frappe's own navbar/breadcrumb chrome is, and doesn't hold for every zoom
+			   level/window size, leaving unused page background below the widget when it
+			   overestimates. resize_layout() always overrides this with a real measurement. */
 			.whatsapp-inbox { display: flex; height: calc(100vh - 180px); border: 1px solid var(--border-color); border-radius: var(--border-radius); overflow: hidden; }
 			.wa-conversations { width: 300px; border-right: 1px solid var(--border-color); display: flex; flex-direction: column; overflow: hidden; }
 			.wa-conversations-filters { padding: 8px; display: flex; gap: 4px; border-bottom: 1px solid var(--border-color); }
@@ -101,20 +142,74 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 			.wa-audio-duration { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
 			.wa-thread-compose { padding: 10px; border-top: 1px solid var(--border-color); }
 			.wa-compose-row { display: flex; align-items: center; gap: 8px; }
-			.wa-compose-text-row textarea { flex: 1; resize: none; }
-			.wa-compose-mic, .wa-compose-send, .wa-record-cancel, .wa-record-stop,
-			.wa-preview-play, .wa-preview-cancel, .wa-preview-send {
+			/* Frappe's default textarea.form-control ships a fixed height:120px (meant
+			   for full-page forms) — overridden here explicitly, then JS drives the
+			   real height per keystroke so it hugs content like WhatsApp's own compose
+			   box instead of always rendering at that fixed size. */
+			.wa-compose-text-row { align-items: flex-end; }
+			.wa-compose-text-row textarea {
+				flex: 1; resize: none; overflow-y: auto;
+				height: 34px; min-height: 34px; max-height: 120px; line-height: 1.4;
+				padding-top: 6px; padding-bottom: 6px;
+			}
+			.wa-compose-mic, .wa-compose-send, .wa-compose-attach, .wa-record-cancel, .wa-record-stop,
+			.wa-preview-play, .wa-preview-cancel, .wa-preview-send,
+			.wa-media-cancel, .wa-media-send {
 				width: 34px; height: 34px; padding: 0; flex-shrink: 0;
 				display: flex; align-items: center; justify-content: center;
 				border-radius: 50%; line-height: 1;
 			}
+			.wa-media-preview { flex-shrink: 0; }
+			.wa-media-preview img, .wa-media-preview video { max-height: 40px; max-width: 60px; border-radius: 4px; display: block; }
+			.wa-media-preview span { font-size: 12px; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; }
+			.wa-compose-media-row .wa-media-caption { flex: 1; }
 			.wa-record-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--red-500, #e03131); flex-shrink: 0; animation: wa-record-pulse 1.2s infinite; }
 			@keyframes wa-record-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
 			.wa-record-timer, .wa-preview-duration { font-size: 12px; color: var(--text-muted); flex-shrink: 0; min-width: 34px; }
 			.wa-record-wave, .wa-preview-wave { flex: 1; height: 34px; }
 			.wa-optimistic-audio .wa-bubble-text { font-style: italic; }
-			.wa-contact-panel { width: 260px; border-left: 1px solid var(--border-color); padding: 14px; overflow-y: auto; }
+			/* Collapsed by default (display:none) — opened by clicking the contact chip
+			   in the thread header, closed via its own × button, same interaction as
+			   WhatsApp Web's "Dados do contato" panel (a real column, not an overlay:
+			   .wa-thread's flex:1 already reclaims the width the instant this hides). */
+			.wa-contact-panel { display: none; width: 300px; border-left: 1px solid var(--border-color); padding: 14px; overflow-y: auto; }
 			.wa-contact-panel h5 { margin-bottom: 2px; }
+			.wa-contact-panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+			.wa-contact-panel-header h5 { margin: 0; }
+			.wa-contact-panel-close { cursor: pointer; font-size: 20px; line-height: 1; color: var(--text-muted); padding: 0 4px; }
+			.wa-contact-panel-close:hover { color: var(--text-color); }
+			.wa-thread-title { cursor: pointer; display: flex; align-items: center; gap: 8px; }
+			.wa-thread-avatar {
+				width: 32px; height: 32px; border-radius: 50%; overflow: hidden; flex-shrink: 0;
+				background: var(--gray-500, #888); color: #fff; display: flex; align-items: center;
+				justify-content: center; font-size: 14px; font-weight: 600;
+			}
+			.wa-thread-avatar img { width: 100%; height: 100%; object-fit: cover; }
+			.wa-media-gallery { display: grid; gap: 4px; margin-top: 6px; }
+			/* Fixed 4-column preview (one row, "no máximo 3 ou 4 numa fileira") vs. the
+			   full browser's grid, which reflows via auto-fill so it never looks
+			   cramped/stretched regardless of the panel's actual width. */
+			.wa-media-gallery-preview { grid-template-columns: repeat(4, 1fr); }
+			.wa-media-gallery-full { grid-template-columns: repeat(auto-fill, minmax(70px, 1fr)); margin-top: 10px; }
+			.wa-media-thumb {
+				aspect-ratio: 1; border-radius: 4px; overflow: hidden; background: var(--bg-color);
+				display: flex; align-items: center; justify-content: center; font-size: 20px; cursor: pointer;
+			}
+			.wa-media-thumb img { width: 100%; height: 100%; object-fit: cover; }
+			.wa-media-section-toggle { cursor: pointer; }
+			.wa-media-section-toggle:hover label { text-decoration: underline; }
+			.wa-media-browser-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+			.wa-media-browser-header h5 { margin: 0; font-size: 14px; }
+			.wa-media-browser-back { cursor: pointer; font-size: 16px; }
+			.wa-media-tabs { display: flex; border-bottom: 1px solid var(--border-color); margin-bottom: 4px; }
+			.wa-media-tab {
+				flex: 1; text-align: center; padding: 6px 0; cursor: pointer; font-size: 12px;
+				color: var(--text-muted); border-bottom: 2px solid transparent;
+			}
+			.wa-media-tab.active { color: var(--text-color); border-bottom-color: var(--primary, #5b8def); font-weight: 600; }
+			.wa-media-link-item { display: block; padding: 8px 2px; border-bottom: 1px solid var(--border-color); font-size: 12px; }
+			.wa-media-link-text { word-break: break-word; }
+			.wa-media-link-date { color: var(--text-muted); font-size: 11px; margin-top: 2px; }
 			.wa-contact-field { font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }
 			.wa-tag-chip, .wa-assign-chip, .wa-role-chip { display: inline-flex; align-items: center; background: var(--bg-color); border: 1px solid var(--border-color); border-radius: 10px; padding: 1px 8px; font-size: 11px; margin: 2px 4px 2px 0; }
 			.wa-tag-chip .remove, .wa-assign-chip .remove { cursor: pointer; margin-left: 5px; color: var(--text-muted); }
@@ -138,6 +233,41 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 			.wa-search-match { background: var(--yellow-200, #fff3b0); border-radius: 2px; }
 			.wa-active-match-row .wa-bubble { outline: 2px solid var(--orange-400, #ff9f43); }
 			.wa-thread-header-top { display: flex; justify-content: space-between; align-items: center; }
+			.wa-bubble-img { cursor: zoom-in; }
+			.wa-lightbox-overlay {
+				position: fixed; inset: 0; background: rgba(0,0,0,.85); z-index: 1100;
+				display: flex; align-items: center; justify-content: center; cursor: zoom-out;
+			}
+			.wa-lightbox-overlay img { max-width: 90vw; max-height: 90vh; border-radius: 4px; box-shadow: 0 4px 24px rgba(0,0,0,.5); }
+			.wa-sandbox-banner { background: var(--yellow-100, #fff9db); border-bottom: 1px solid var(--border-color); padding: 6px 10px; font-size: 12px; }
+			.wa-sandbox-banner button { margin-left: 6px; }
+			.wa-emoji-picker-wrap { position: relative; }
+			.wa-emoji-picker {
+				position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 10;
+				background: var(--card-bg, #fff); border: 1px solid var(--border-color);
+				border-radius: var(--border-radius); width: 260px; max-height: 260px;
+				box-shadow: var(--shadow-sm, 0 1px 3px rgba(0,0,0,.15));
+				display: flex; flex-direction: column; overflow: hidden;
+			}
+			.wa-emoji-tabs { display: flex; border-bottom: 1px solid var(--border-color); padding: 4px; flex-shrink: 0; }
+			.wa-emoji-tab { flex: 1; text-align: center; cursor: pointer; padding: 4px 0; border-radius: 4px; font-size: 15px; }
+			.wa-emoji-tab:hover { background: var(--fg-hover-color); }
+			.wa-emoji-tab.active { background: var(--fg-hover-color); }
+			.wa-emoji-grid { flex: 1; overflow-y: auto; padding: 6px; display: grid; grid-template-columns: repeat(8, 1fr); gap: 2px; align-content: start; }
+			.wa-emoji-option { cursor: pointer; text-align: center; padding: 3px; border-radius: 4px; font-size: 16px; line-height: 1.4; }
+			.wa-emoji-option:hover { background: var(--fg-hover-color); }
+			.wa-emoji-loading { padding: 10px; font-size: 12px; color: var(--text-muted); }
+			.wa-status-filter { position: relative; }
+			.wa-status-filter-toggle { white-space: nowrap; }
+			.wa-status-filter-menu {
+				position: absolute; top: 100%; left: 0; z-index: 10; margin-top: 2px;
+				background: var(--card-bg, #fff); border: 1px solid var(--border-color);
+				border-radius: var(--border-radius); padding: 4px 0; min-width: 170px;
+				box-shadow: var(--shadow-sm, 0 1px 3px rgba(0,0,0,.15));
+			}
+			.wa-status-filter-option { display: block; padding: 4px 10px; margin: 0; font-size: 12px; font-weight: normal; cursor: pointer; white-space: nowrap; }
+			.wa-status-filter-option:hover { background: var(--fg-hover-color); }
+			.wa-status-filter-option input { margin-right: 6px; }
 			.wa-thread-search-bar { display: flex; align-items: center; gap: 6px; padding-top: 6px; }
 			.wa-thread-search-bar input { flex: 1; font-size: 12px; padding: 2px 6px; }
 			.wa-thread-search-counter { font-size: 11px; color: var(--text-muted); min-width: 34px; text-align: center; }
@@ -151,18 +281,21 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 					<div class="wa-conversations-toolbar" style="padding: 8px; display: flex; gap: 4px; border-bottom: 1px solid var(--border-color);">
 						<button class="btn btn-default btn-sm wa-new-contact" style="flex:1;">+ Novo Contato</button>
 						<button class="btn btn-default btn-sm wa-new-conversation" style="flex:1;">+ Nova Conversa</button>
+						${this.is_system_manager ? '<button class="btn btn-default btn-sm wa-open-sandbox" style="flex:1;" title="Conversa de teste, sem depender do número real da Meta">🧪 Sandbox</button>' : ''}
 					</div>
 					<div class="wa-conversations-search">
 						<input class="form-control form-control-sm wa-global-search-input" placeholder="🔍 Buscar em todas as conversas">
 					</div>
 					<div class="wa-conversations-filters">
-						<select class="form-control wa-filter-status">
-							<option value="">Status: Todos</option>
-							<option value="Novo">Novo</option>
-							<option value="Em andamento">Em andamento</option>
-							<option value="Aguardando cliente">Aguardando cliente</option>
-							<option value="Resolvido">Resolvido</option>
-						</select>
+						<div class="wa-status-filter">
+							<button type="button" class="btn btn-default btn-sm wa-status-filter-toggle">Status: Todos</button>
+							<div class="wa-status-filter-menu" style="display:none;">
+								<label class="wa-status-filter-option"><input type="checkbox" value="Novo"> Novo</label>
+								<label class="wa-status-filter-option"><input type="checkbox" value="Em andamento"> Em andamento</label>
+								<label class="wa-status-filter-option"><input type="checkbox" value="Aguardando cliente"> Aguardando cliente</label>
+								<label class="wa-status-filter-option"><input type="checkbox" value="Resolvido"> Resolvido</label>
+							</div>
+						</div>
 						<input class="form-control wa-filter-tag" placeholder="Tag">
 						<input class="form-control wa-filter-agent" placeholder="Agente">
 					</div>
@@ -181,11 +314,26 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 							<button class="btn btn-default btn-xs wa-thread-search-next" title="Próxima">↓</button>
 							<button class="btn btn-default btn-xs wa-thread-search-close" title="Fechar">×</button>
 						</div>
+						<div class="wa-sandbox-banner" style="display:none;">
+							🧪 Conversa de sandbox — envio real (texto/áudio/imagem/vídeo/documento) só
+							funciona depois de configurar uma WhatsApp Account real (aguardando número
+							de teste da Meta).
+							${this.is_system_manager ? `
+								<button class="btn btn-default btn-xs wa-sandbox-simulate">Simular recebimento</button>
+								<button class="btn btn-default btn-xs wa-sandbox-clear">Limpar mensagens de teste</button>
+							` : ''}
+						</div>
 					</div>
 					<div class="wa-thread-messages"></div>
 					<div class="wa-thread-compose" style="display:none;">
 						<div class="wa-compose-row wa-compose-text-row">
 							<textarea class="form-control wa-compose-input" rows="1" placeholder="Digite uma mensagem"></textarea>
+							<div class="wa-emoji-picker-wrap">
+								<button class="btn btn-default btn-sm wa-compose-emoji" title="Emoji">😀</button>
+								<div class="wa-emoji-picker" style="display:none;"></div>
+							</div>
+							<button class="btn btn-default btn-sm wa-compose-attach" title="Anexar imagem, vídeo ou documento">📎</button>
+							<input type="file" class="wa-media-file-input" style="display:none;">
 							<button class="btn btn-default btn-sm wa-compose-mic" title="Gravar áudio">🎤</button>
 							<button class="btn btn-primary btn-sm wa-compose-send" style="display:none;" title="Enviar">➤</button>
 						</div>
@@ -203,9 +351,21 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 							<button class="btn btn-default btn-sm wa-preview-cancel" title="Descartar">🗑</button>
 							<button class="btn btn-primary btn-sm wa-preview-send" title="Enviar áudio">➤</button>
 						</div>
+						<div class="wa-compose-row wa-compose-media-row" style="display:none;">
+							<div class="wa-media-preview"></div>
+							<input class="form-control form-control-sm wa-media-caption" placeholder="Legenda (opcional)">
+							<button class="btn btn-default btn-sm wa-media-cancel" title="Descartar">🗑</button>
+							<button class="btn btn-primary btn-sm wa-media-send" title="Enviar">➤</button>
+						</div>
 					</div>
 				</div>
-				<div class="wa-contact-panel"><div class="wa-empty-state">Nenhum contato selecionado</div></div>
+				<div class="wa-contact-panel">
+					<div class="wa-contact-panel-header">
+						<h5>Dados do contato</h5>
+						<span class="wa-contact-panel-close" title="Fechar">×</span>
+					</div>
+					<div class="wa-contact-panel-body"><div class="wa-empty-state">Nenhum contato selecionado</div></div>
+				</div>
 			</div>
 		`);
 	}
@@ -213,9 +373,31 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 	bind_events() {
 		const main = this.page.body;
 
-		main.on('change', '.wa-filter-status', (e) => {
-			this.filters.status = e.target.value;
+		main.on('click', '.wa-status-filter-toggle', (e) => {
+			e.stopPropagation();
+			this.page.body.find('.wa-status-filter-menu').toggle();
+		});
+		main.on('click', '.wa-status-filter-menu', (e) => e.stopPropagation());
+		main.on('change', '.wa-status-filter-menu input[type="checkbox"]', () => {
+			this.filters.status = this.page.body
+				.find('.wa-status-filter-menu input[type="checkbox"]:checked')
+				.map((_, el) => el.value)
+				.get();
+			this.update_status_filter_label();
 			this.refresh_conversations();
+		});
+		main.on('click', '.wa-compose-emoji', (e) => {
+			e.stopPropagation();
+			this.toggle_emoji_picker();
+		});
+		main.on('click', '.wa-emoji-picker', (e) => e.stopPropagation());
+		main.on('click', '.wa-emoji-tab', (e) => this.render_emoji_picker(+$(e.currentTarget).data('index')));
+		main.on('click', '.wa-emoji-option', (e) => this.insert_emoji_at_cursor($(e.currentTarget).text()));
+		// Closes any open dropdown (status filter, emoji picker) on a click outside
+		// it — namespaced since this page instance is created once per session and
+		// never torn down (same as every other listener in this class).
+		$(document).on('click.wa-dropdowns', () => {
+			this.page.body.find('.wa-status-filter-menu, .wa-emoji-picker').hide();
 		});
 		main.on('input', '.wa-filter-tag', frappe.utils.debounce((e) => {
 			this.filters.tag = e.target.value;
@@ -232,6 +414,16 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 
 		main.on('click', '.wa-new-contact', () => this.open_new_contact_dialog());
 		main.on('click', '.wa-new-conversation', () => this.open_new_conversation_dialog());
+		main.on('click', '.wa-bubble-img', (e) => {
+			e.stopPropagation(); // a gallery thumb inside .wa-media-section-toggle must only zoom, not also open the full browser
+			this.open_image_lightbox(e.currentTarget.src);
+		});
+		// Video/document preview thumbs are plain links (open in a new tab) — same
+		// stopPropagation reasoning as .wa-bubble-img above, just without a lightbox.
+		main.on('click', '.wa-media-thumb', (e) => e.stopPropagation());
+		main.on('click', '.wa-open-sandbox', () => this.open_sandbox());
+		main.on('click', '.wa-sandbox-simulate', () => this.open_simulate_incoming_dialog());
+		main.on('click', '.wa-sandbox-clear', () => this.clear_sandbox_messages());
 
 		main.on('input', '.wa-global-search-input', frappe.utils.debounce((e) => {
 			this.run_global_search(e.target.value.trim());
@@ -245,6 +437,11 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 		});
 
 		main.on('click', '.wa-thread-search-toggle', () => this.toggle_thread_search());
+		main.on('click', '.wa-thread-title', () => this.toggle_contact_panel());
+		main.on('click', '.wa-contact-panel-close', () => this.toggle_contact_panel(false));
+		main.on('click', '.wa-media-section-toggle', () => this.open_media_gallery_view());
+		main.on('click', '.wa-media-browser-back', () => this.load_contact_panel(this.current_conversation));
+		main.on('click', '.wa-media-tab', (e) => this.render_media_gallery_view($(e.currentTarget).data('tab')));
 		main.on('click', '.wa-thread-search-close', () => this.toggle_thread_search());
 		main.on('input', '.wa-thread-search-input', frappe.utils.debounce((e) => {
 			this.thread_search_query = e.target.value.trim();
@@ -269,7 +466,10 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 				this.send_message();
 			}
 		});
-		main.on('input', '.wa-compose-input', () => this.update_compose_buttons());
+		main.on('input', '.wa-compose-input', (e) => {
+			this.update_compose_buttons();
+			this.autosize_compose_input(e.currentTarget);
+		});
 
 		main.on('click', '.wa-compose-mic', () => this.start_recording());
 		main.on('click', '.wa-record-cancel', () => this.cancel_recording());
@@ -277,6 +477,11 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 		main.on('click', '.wa-preview-play', () => this.toggle_preview_playback());
 		main.on('click', '.wa-preview-cancel', () => this.discard_recording());
 		main.on('click', '.wa-preview-send', () => this.send_recorded_audio());
+
+		main.on('click', '.wa-compose-attach', () => this.page.body.find('.wa-media-file-input').trigger('click'));
+		main.on('change', '.wa-media-file-input', (e) => this.on_media_file_selected(e.target.files[0]));
+		main.on('click', '.wa-media-cancel', () => this.discard_media());
+		main.on('click', '.wa-media-send', () => this.send_media());
 
 		main.on('change', '.wa-status-select', (e) => {
 			frappe.db.set_value('WhatsApp Conversation', this.current_conversation, 'status', e.target.value)
@@ -356,6 +561,81 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 		});
 	}
 
+	update_status_filter_label() {
+		const selected = this.filters.status || [];
+		let label;
+		if (!selected.length) label = 'Status: Todos';
+		else if (selected.length === 1) label = `Status: ${selected[0]}`;
+		else label = `Status: ${selected.length} selecionados`;
+		this.page.body.find('.wa-status-filter-toggle').text(label);
+	}
+
+	// Sandbox (teste manual sem depender do número real da Meta): abre (criando
+	// se ainda não existir) a conversa fictícia e a trata como qualquer outra —
+	// o compose normal (texto/mic/anexo) já testa send_message/send_audio_message/
+	// send_media_message de verdade; só falta simular o lado de ENTRADA, que
+	// nenhum outro fluxo da UI cobre hoje (mensagens de entrada só existiam via
+	// webhook real até agora).
+	open_sandbox() {
+		frappe.call({ method: 'takion_whatsapp.client.sandbox.ensure_sandbox_conversation' }).then((r) => {
+			this.refresh_conversations();
+			this.open_conversation(r.message);
+		});
+	}
+
+	open_simulate_incoming_dialog() {
+		const conversation = this.current_conversation;
+		const d = new frappe.ui.Dialog({
+			title: __('Simular mensagem recebida (sandbox)'),
+			fields: [
+				{
+					fieldname: 'content_type', fieldtype: 'Select', label: __('Tipo'),
+					options: ['text', 'image', 'video', 'document', 'audio'].join('\n'),
+					default: 'text', reqd: 1,
+				},
+				{ fieldname: 'message', fieldtype: 'Small Text', label: __('Mensagem / legenda') },
+				{
+					fieldname: 'file', fieldtype: 'Attach', label: __('Arquivo (necessário exceto p/ texto)'),
+					depends_on: 'eval:doc.content_type !== "text"',
+				},
+			],
+			primary_action_label: __('Simular'),
+			primary_action: (values) => {
+				if (values.content_type !== 'text' && !values.file) {
+					frappe.msgprint(__('Selecione um arquivo para este tipo.'));
+					return;
+				}
+				frappe.call({
+					method: 'takion_whatsapp.client.sandbox.simulate_incoming',
+					args: {
+						conversation,
+						content_type: values.content_type,
+						message: values.message,
+						file_url: values.file,
+					},
+				}).then(() => {
+					d.hide();
+					this.load_thread(conversation);
+					this.refresh_conversations();
+				});
+			},
+		});
+		d.show();
+	}
+
+	clear_sandbox_messages() {
+		const conversation = this.current_conversation;
+		frappe.confirm(__('Apagar todas as mensagens desta conversa de sandbox?'), () => {
+			frappe.call({
+				method: 'takion_whatsapp.client.sandbox.clear_sandbox_messages',
+				args: { conversation },
+			}).then(() => {
+				this.load_thread(conversation);
+				this.refresh_conversations();
+			});
+		});
+	}
+
 	refresh_conversations() {
 		frappe.call({
 			method: 'takion_whatsapp.client.inbox.get_conversations',
@@ -418,6 +698,7 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 
 	open_conversation(name, jump_to_message) {
 		this.abort_compose_recording();
+		this.discard_media();
 		this.current_conversation = name;
 		this.pending_jump_message = jump_to_message || null;
 		this.thread_search_query = '';
@@ -429,6 +710,7 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 		this.page.body.find(`.wa-conversation-item[data-name="${name}"]`).addClass('active');
 		this.page.body.find('.wa-thread-compose').show();
 		this.page.body.find('.wa-compose-input').val('');
+		this.autosize_compose_input();
 		this.update_compose_buttons();
 
 		this.load_thread(name);
@@ -449,7 +731,8 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 	}
 
 	render_thread(messages) {
-		this.page.body.find('.wa-thread-title').text(this.current_conversation);
+		// .wa-thread-title itself (avatar + name) is set by render_thread_contact_chip,
+		// called from load_contact_panel — both fire together from open_conversation.
 		this.page.body.find('.wa-thread-search-toggle').show();
 
 		this.waveforms.forEach((ws) => ws.destroy());
@@ -637,6 +920,20 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 		`;
 	}
 
+	// Click-to-zoom on any image bubble — a fullscreen overlay with the same
+	// URL at full size, closed by clicking anywhere or pressing Escape.
+	open_image_lightbox(src) {
+		const $overlay = $(`<div class="wa-lightbox-overlay"><img src="${frappe.utils.escape_html(src)}"></div>`).appendTo('body');
+		const close = () => {
+			$overlay.remove();
+			$(document).off('keydown.wa-lightbox');
+		};
+		$overlay.on('click', close);
+		$(document).on('keydown.wa-lightbox', (e) => {
+			if (e.key === 'Escape') close();
+		});
+	}
+
 	render_check(status) {
 		if (status === 'read') return ' <span class="wa-check wa-check-read">✓✓</span>';
 		if (status === 'delivered') return ' <span class="wa-check">✓✓</span>';
@@ -645,10 +942,23 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 	}
 
 	render_generic_bubble(msg) {
+		// Image/video captions ride in the same `message` field text messages use
+		// (see WhatsAppMessage.send_outgoing's data[content_type]["caption"]) —
+		// rendered below the media, same as WhatsApp's own bubble layout.
+		const caption = msg.message
+			? `<div class="wa-bubble-text" style="margin-top:4px;">${
+				this.thread_search_query
+					? this.highlight_text(msg.message, this.thread_search_query)
+					: frappe.utils.escape_html(msg.message)
+			}</div>`
+			: '';
 		if (msg.content_type === 'image' && msg.attach) {
-			return `<img src="${frappe.utils.escape_html(msg.attach)}" style="max-width:220px;border-radius:4px;">`;
+			return `<img class="wa-bubble-img" src="${frappe.utils.escape_html(msg.attach)}" style="max-width:220px;border-radius:4px;">${caption}`;
 		}
-		if (msg.attach && ['document', 'video'].includes(msg.content_type)) {
+		if (msg.content_type === 'video' && msg.attach) {
+			return `<video src="${frappe.utils.escape_html(msg.attach)}" controls style="max-width:220px;border-radius:4px;"></video>${caption}`;
+		}
+		if (msg.attach && msg.content_type === 'document') {
 			return `<a href="${frappe.utils.escape_html(msg.attach)}" target="_blank">📎 ${frappe.utils.escape_html(msg.attach.split('/').pop())}</a>`;
 		}
 		const html = this.thread_search_query
@@ -683,6 +993,7 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 		if (!text || !this.current_conversation) return;
 
 		$input.val('').prop('disabled', true);
+		this.autosize_compose_input();
 		frappe.call({
 			method: 'takion_whatsapp.client.inbox.send_message',
 			args: { conversation: this.current_conversation, message: text },
@@ -692,6 +1003,64 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 			this.load_thread(this.current_conversation);
 			this.refresh_conversations();
 		}).catch(() => $input.prop('disabled', false));
+	}
+
+	// Grows the textarea with its content, like WhatsApp's own compose box —
+	// capped at max-height (CSS), after which it scrolls internally instead of
+	// growing forever. Reset to 'auto' first so shrinking (e.g. after deleting
+	// lines) is picked up too, not just growth.
+	autosize_compose_input(el) {
+		el = el || this.page.body.find('.wa-compose-input')[0];
+		if (!el) return;
+		el.style.height = 'auto';
+		el.style.height = el.scrollHeight + 'px';
+	}
+
+	// Full 1914-emoji, 9-category set, fetched once (lazily, on first open) from
+	// the vendored JSON — see WA_EMOJI_CATEGORY_ICONS' comment for provenance.
+	async toggle_emoji_picker() {
+		const $picker = this.page.body.find('.wa-emoji-picker');
+		if ($picker.is(':visible')) {
+			$picker.hide();
+			return;
+		}
+		if (!this.emoji_categories) {
+			$picker.html('<div class="wa-emoji-loading">Carregando…</div>').show();
+			try {
+				const res = await fetch('/assets/takion_whatsapp/js/lib/emoji-data.json');
+				this.emoji_categories = await res.json();
+			} catch (e) {
+				$picker.html('<div class="wa-emoji-loading">Não foi possível carregar os emojis.</div>');
+				return;
+			}
+		}
+		this.render_emoji_picker(this.emoji_active_category || 0);
+		$picker.show();
+	}
+
+	render_emoji_picker(category_index) {
+		this.emoji_active_category = category_index;
+		const $picker = this.page.body.find('.wa-emoji-picker');
+		const tabs = this.emoji_categories
+			.map((cat, i) => `<span class="wa-emoji-tab${i === category_index ? ' active' : ''}" data-index="${i}" title="${frappe.utils.escape_html(cat.name)}">${WA_EMOJI_CATEGORY_ICONS[i] || '•'}</span>`)
+			.join('');
+		const grid = this.emoji_categories[category_index].emojis
+			.map(([emoji, name]) => `<span class="wa-emoji-option" title="${frappe.utils.escape_html(name)}">${emoji}</span>`)
+			.join('');
+		$picker.html(`<div class="wa-emoji-tabs">${tabs}</div><div class="wa-emoji-grid">${grid}</div>`);
+	}
+
+	insert_emoji_at_cursor(emoji) {
+		const el = this.page.body.find('.wa-compose-input')[0];
+		if (!el) return;
+		const start = el.selectionStart ?? el.value.length;
+		const end = el.selectionEnd ?? el.value.length;
+		el.value = el.value.slice(0, start) + emoji + el.value.slice(end);
+		const cursor = start + emoji.length;
+		el.selectionStart = el.selectionEnd = cursor;
+		el.focus();
+		this.autosize_compose_input(el);
+		this.update_compose_buttons();
 	}
 
 	update_compose_buttons() {
@@ -705,6 +1074,7 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 		$compose.find('.wa-compose-text-row').toggle(which === 'text');
 		$compose.find('.wa-compose-record-row').toggle(which === 'record');
 		$compose.find('.wa-compose-preview-row').toggle(which === 'preview');
+		$compose.find('.wa-compose-media-row').toggle(which === 'media');
 		if (which === 'text') this.update_compose_buttons();
 	}
 
@@ -905,18 +1275,133 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 		}, 15000);
 	}
 
+	on_media_file_selected(file) {
+		const $input = this.page.body.find('.wa-media-file-input');
+		if (!file) return;
+
+		// Anything that isn't image/video goes through as a generic WhatsApp
+		// "document" — frappe_whatsapp already sends/receives that content_type
+		// exactly like image/video (link + caption), just with a bigger size cap.
+		const kind = file.type.startsWith('image/') ? 'image' : file.type.startsWith('video/') ? 'video' : 'document';
+		if (file.size > this.MEDIA_MAX_BYTES[kind]) {
+			const limit_mb = this.MEDIA_MAX_BYTES[kind] / (1024 * 1024);
+			frappe.msgprint(__('Arquivo muito grande para o WhatsApp (limite de {0}MB).', [limit_mb]));
+			$input.val('');
+			return;
+		}
+
+		this.media_file = file;
+		this.media_kind = kind;
+		this.show_media_preview(file, kind);
+		$input.val(''); // allow re-selecting the same file later
+	}
+
+	show_media_preview(file, kind) {
+		this.show_compose_row('media');
+		const $preview = this.page.body.find('.wa-media-preview').empty();
+
+		if (kind === 'document') {
+			this._media_preview_url = null;
+			$preview.append(`<span title="${frappe.utils.escape_html(file.name)}">📄 ${frappe.utils.escape_html(file.name)}</span>`);
+			return;
+		}
+
+		const url = URL.createObjectURL(file);
+		this._media_preview_url = url;
+		if (kind === 'image') {
+			$preview.append(`<img src="${url}">`);
+		} else {
+			$preview.append(`<video src="${url}" muted></video>`);
+		}
+	}
+
+	discard_media() {
+		if (this._media_preview_url) {
+			URL.revokeObjectURL(this._media_preview_url);
+			this._media_preview_url = null;
+		}
+		this.media_file = null;
+		this.media_kind = null;
+		this.page.body.find('.wa-media-caption').val('');
+		this.page.body.find('.wa-media-preview').empty();
+		this.show_compose_row('text');
+	}
+
+	send_media() {
+		if (!this.media_file || !this.current_conversation) return;
+		const file = this.media_file;
+		const kind = this.media_kind;
+		const caption = this.page.body.find('.wa-media-caption').val().trim();
+		const conversation = this.current_conversation;
+
+		this.discard_media();
+		this.render_optimistic_media_bubble(kind);
+
+		const form_data = new FormData();
+		form_data.append('file', file, file.name);
+		form_data.append('is_private', 0);
+		form_data.append('doctype', 'WhatsApp Conversation');
+		form_data.append('docname', conversation);
+
+		fetch('/api/method/upload_file', {
+			method: 'POST',
+			headers: { 'X-Frappe-CSRF-Token': frappe.csrf_token },
+			body: form_data,
+		})
+			.then((r) => r.json())
+			.then((r) => {
+				const file_url = r.message && r.message.file_url;
+				if (!file_url) throw new Error('upload failed');
+				return frappe.call({
+					method: 'takion_whatsapp.client.inbox.send_media_message',
+					args: { conversation, file_url, content_type: kind, caption },
+				});
+			})
+			.then(() => this.load_thread(conversation))
+			.catch(() => {
+				frappe.msgprint(__('Não foi possível enviar o arquivo. Tente novamente.'));
+			});
+	}
+
+	// Placeholder only, same pattern/fallback timeout as render_optimistic_audio_bubble
+	// — real bubble replaces it once whatsapp_inbox_update triggers load_thread().
+	render_optimistic_media_bubble(kind) {
+		const conversation = this.current_conversation;
+		const $messages = this.page.body.find('.wa-thread-messages');
+		const icon = kind === 'image' ? '🖼️' : kind === 'video' ? '🎬' : '📄';
+		$messages.append(`
+			<div class="wa-bubble-row out wa-optimistic-media">
+				<div class="wa-bubble"><div class="wa-bubble-text text-muted">${icon} ${__('Enviando...')}</div></div>
+			</div>
+		`);
+		$messages.scrollTop($messages[0].scrollHeight);
+		setTimeout(() => {
+			if (this.current_conversation === conversation) this.load_thread(conversation);
+		}, 15000);
+	}
+
 	load_contact_panel(name) {
 		frappe.db.get_doc('WhatsApp Conversation', name).then((conversation) => {
+			this.page.body.find('.wa-sandbox-banner').toggle(conversation.phone_number === SANDBOX_PHONE_NUMBER);
+			const media_call = frappe.call({ method: 'takion_whatsapp.client.inbox.get_media_gallery', args: { conversation: name } });
+			const empty_gallery = { all: [], media: [], documents: [], links: [] };
 			if (conversation.contact) {
 				Promise.all([
 					frappe.db.get_doc('Contact', conversation.contact),
 					frappe.call({ method: 'takion_whatsapp.client.contacts.get_contact_roles', args: { contact: conversation.contact } }),
 					frappe.call({ method: 'takion_whatsapp.client.pipeline.get_pipeline_state', args: { contact: conversation.contact } }),
-				]).then(([contact, roles_resp, pipeline_resp]) =>
-					this.render_contact_panel(conversation, contact, roles_resp.message || [], pipeline_resp.message || { leads: [], opportunities: [] })
-				);
+					media_call,
+				]).then(([contact, roles_resp, pipeline_resp, media_resp]) => {
+					this.render_thread_contact_chip(conversation, contact);
+					this.current_media_gallery = media_resp.message || empty_gallery;
+					this.render_contact_panel(conversation, contact, roles_resp.message || [], pipeline_resp.message || { leads: [], opportunities: [] }, this.current_media_gallery);
+				});
 			} else {
-				this.render_contact_panel(conversation, null, [], { leads: [], opportunities: [] });
+				this.render_thread_contact_chip(conversation, null);
+				media_call.then((media_resp) => {
+					this.current_media_gallery = media_resp.message || empty_gallery;
+					this.render_contact_panel(conversation, null, [], { leads: [], opportunities: [] }, this.current_media_gallery);
+				});
 			}
 		});
 	}
@@ -974,8 +1459,8 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 		return '';
 	}
 
-	render_contact_panel(conversation, contact, roles, pipeline) {
-		const $panel = this.page.body.find('.wa-contact-panel');
+	render_contact_panel(conversation, contact, roles, pipeline, gallery) {
+		const $panel = this.page.body.find('.wa-contact-panel-body');
 		const tags = (conversation._user_tags || '').split(',').map((t) => t.trim()).filter(Boolean);
 		let assignees = [];
 		try { assignees = JSON.parse(conversation._assign || '[]'); } catch (e) { assignees = []; }
@@ -1022,6 +1507,15 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 				</div>
 			` : ''}
 
+			${gallery && (gallery.all.length || gallery.links.length) ? `
+				<div class="mt-3 wa-media-section-toggle" title="Ver tudo">
+					<label class="text-muted small">Mídia, links e docs (${gallery.all.length + gallery.links.length})</label>
+					<div class="wa-media-gallery wa-media-gallery-preview">
+						${gallery.all.slice(0, 4).map((m) => this.render_media_thumb(m)).join('')}
+					</div>
+				</div>
+			` : ''}
+
 			<div class="mt-3"><label class="text-muted small">Status</label>
 				<select class="form-control form-control-sm wa-status-select">
 					${['Novo', 'Em andamento', 'Aguardando cliente', 'Resolvido'].map((s) =>
@@ -1039,6 +1533,87 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 				<input class="form-control form-control-sm wa-assign-input mt-1" placeholder="+ e-mail do agente">
 			</div>
 		`);
+	}
+
+	// Images open in the same lightbox as thread bubbles; video/document don't
+	// have a cheap thumbnail to generate here, so they're a plain icon tile
+	// linking straight to the file (same as the thread's own document bubble).
+	render_media_thumb(m) {
+		if (m.content_type === 'image') {
+			return `<div class="wa-media-thumb"><img class="wa-bubble-img" src="${frappe.utils.escape_html(m.attach)}"></div>`;
+		}
+		const icon = m.content_type === 'video' ? '🎬' : '📄';
+		return `<a class="wa-media-thumb" href="${frappe.utils.escape_html(m.attach)}" target="_blank" title="${frappe.utils.escape_html(m.attach.split('/').pop())}">${icon}</a>`;
+	}
+
+	// Full tabbed browser (Mídia/Documentos/Links), replacing the contact-info
+	// body the same way WhatsApp Web's own panel navigates — same drawer, back
+	// arrow returns to "Dados do contato" (a plain re-fetch, simplest correct
+	// way to restore that view without caching it separately).
+	open_media_gallery_view() {
+		if (!this.current_media_gallery) return;
+		this.render_media_gallery_view(this.media_gallery_tab || 'media');
+	}
+
+	render_media_gallery_view(tab) {
+		this.media_gallery_tab = tab;
+		const gallery = this.current_media_gallery;
+		const items = gallery[tab] || [];
+		const TAB_LABELS = { media: 'Mídia', documents: 'Documentos', links: 'Links' };
+
+		const $body = this.page.body.find('.wa-contact-panel-body');
+		$body.html(`
+			<div class="wa-media-browser-header">
+				<span class="wa-media-browser-back" title="Voltar">←</span>
+				<h5>Mídia, links e docs</h5>
+			</div>
+			<div class="wa-media-tabs">
+				${Object.keys(TAB_LABELS).map((key) =>
+					`<span class="wa-media-tab${key === tab ? ' active' : ''}" data-tab="${key}">${TAB_LABELS[key]}</span>`
+				).join('')}
+			</div>
+			${items.length
+				? tab === 'links'
+					? items.map((m) => this.render_link_item(m)).join('')
+					: `<div class="wa-media-gallery wa-media-gallery-full">${items.map((m) => this.render_media_thumb(m)).join('')}</div>`
+				: '<div class="wa-empty-state" style="height:auto;padding:20px 0;">Nada por aqui ainda</div>'}
+		`);
+	}
+
+	render_link_item(m) {
+		const url_match = (m.message || '').match(/https?:\/\/\S+/);
+		const url = url_match ? url_match[0] : '#';
+		return `
+			<a class="wa-media-link-item" href="${frappe.utils.escape_html(url)}" target="_blank">
+				<div class="wa-media-link-text">${frappe.utils.escape_html(m.message || '')}</div>
+				<div class="wa-media-link-date">${frappe.datetime.str_to_user(m.creation, true)}</div>
+			</a>
+		`;
+	}
+
+	// Avatar + name (+ phone, when it isn't already the displayed name) in the
+	// thread header — clickable to open the contact drawer, same as WhatsApp
+	// Web's own header chip.
+	render_thread_contact_chip(conversation, contact) {
+		const name = contact ? [contact.first_name, contact.last_name].filter(Boolean).join(' ') : (conversation.phone_number_display || conversation.name);
+		const phone = conversation.phone_number_display || '';
+		// Array.from (not charAt(0)) so a name starting with a surrogate-pair
+		// character (an emoji, e.g. the sandbox's own "🧪 Sandbox de Teste") yields
+		// the whole glyph instead of a mangled half-surrogate.
+		const initial = Array.from((name || '?').trim())[0].toUpperCase();
+		const avatar = contact && contact.image
+			? `<img src="${frappe.utils.escape_html(contact.image)}">`
+			: `<span>${frappe.utils.escape_html(initial)}</span>`;
+		this.page.body.find('.wa-thread-title').html(`
+			<span class="wa-thread-avatar">${avatar}</span>
+			<span>${frappe.utils.escape_html(name)}${phone && phone !== name ? ` <small class="text-muted">${frappe.utils.escape_html(phone)}</small>` : ''}</span>
+		`);
+	}
+
+	toggle_contact_panel(force) {
+		const $panel = this.page.body.find('.wa-contact-panel');
+		const show = force !== undefined ? force : !$panel.is(':visible');
+		$panel.toggle(show);
 	}
 
 	link_bare_conversation_to_contact() {

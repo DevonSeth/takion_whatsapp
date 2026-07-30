@@ -6,17 +6,36 @@ WhatsApp Conversation / WhatsApp Message.
 Search (in-conversation and global) is deliberately not part of this file yet — tracked
 as the next item after this Entrega ships, not this one.
 """
+import re
+
 import frappe
+from frappe import _
 
 from takion_whatsapp.client.conversation import get_or_create_conversation
 from takion_whatsapp.utils import normalize_phone_number
+
+# Meta's own size caps (see WhatsApp Cloud API media reference) — checked here so
+# an oversized upload fails fast with a clear message instead of a cryptic error
+# from send_outgoing()'s Graph API call.
+MEDIA_MAX_BYTES = {
+	"image": 5 * 1024 * 1024,
+	"video": 16 * 1024 * 1024,
+	"document": 100 * 1024 * 1024,
+}
+
+URL_PATTERN = re.compile(r"https?://\S+")
 
 
 @frappe.whitelist()
 def get_conversations(status=None, tag=None, assigned_to=None):
 	filters = {}
 	if status:
-		filters["status"] = status
+		# Multi-select filter: JS sends a JSON-encoded array (possibly with a
+		# single value) rather than one status string.
+		if isinstance(status, str):
+			status = frappe.parse_json(status)
+		if status:
+			filters["status"] = ["in", status]
 	if tag:
 		filters["_user_tags"] = ["like", f"%{tag}%"]
 	if assigned_to:
@@ -55,6 +74,32 @@ def get_thread(conversation):
 
 
 @frappe.whitelist()
+def get_media_gallery(conversation):
+	"""Feeds the contact panel's "Mídia, links e docs" — a compact preview
+	(caller slices it) plus the 3 full tabs (Mídia/Documentos/Links) shown when
+	the operator opens the full browser, mirroring WhatsApp Web's own
+	contact-info panel. `rows` is already creation-desc, so filtering preserves
+	that order in every bucket without a second sort.
+	"""
+	rows = frappe.get_list(
+		"WhatsApp Message",
+		filters={"reference_doctype": "WhatsApp Conversation", "reference_name": conversation},
+		fields=["name", "content_type", "message", "attach", "creation"],
+		order_by="creation desc",
+	)
+	media = [r for r in rows if r.content_type in ("image", "video") and r.attach]
+	documents = [r for r in rows if r.content_type == "document" and r.attach]
+	links = [r for r in rows if r.message and URL_PATTERN.search(r.message)]
+
+	return {
+		"all": [r for r in rows if r.content_type in ("image", "video", "document") and r.attach],
+		"media": media,
+		"documents": documents,
+		"links": links,
+	}
+
+
+@frappe.whitelist()
 def send_message(conversation, message):
 	conv = frappe.get_doc("WhatsApp Conversation", conversation)
 
@@ -86,6 +131,37 @@ def send_audio_message(conversation, file_url):
 		conversation=conversation,
 		file_url=file_url,
 	)
+
+
+@frappe.whitelist()
+def send_media_message(conversation, file_url, content_type, caption=None):
+	"""Operator-attached image, video, or document. Unlike send_audio_message, no
+	conversion is needed — Meta accepts these formats directly — so this sends
+	synchronously through the same frappe_whatsapp path as send_message (which
+	already builds the `{content_type: {link, caption}}` payload for
+	content_type in ["image", "video", "document"], see WhatsAppMessage.send_outgoing).
+	"""
+	if content_type not in MEDIA_MAX_BYTES:
+		frappe.throw(_("Tipo de mídia não suportado: {0}").format(content_type))
+
+	file_doc = frappe.get_doc("File", {"file_url": file_url})
+	if file_doc.file_size and file_doc.file_size > MEDIA_MAX_BYTES[content_type]:
+		limit_mb = MEDIA_MAX_BYTES[content_type] // (1024 * 1024)
+		frappe.throw(_("Arquivo excede o limite de {0}MB do WhatsApp para {1}.").format(limit_mb, content_type))
+
+	conv = frappe.get_doc("WhatsApp Conversation", conversation)
+
+	doc = frappe.new_doc("WhatsApp Message")
+	doc.type = "Outgoing"
+	doc.content_type = content_type
+	doc.to = conv.wa_id
+	doc.attach = file_url
+	doc.message = caption
+	doc.reference_doctype = "WhatsApp Conversation"
+	doc.reference_name = conv.name
+	doc.insert()  # frappe_whatsapp's before_insert triggers the actual send via send_outgoing()
+
+	return doc.name
 
 
 @frappe.whitelist()
