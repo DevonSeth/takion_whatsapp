@@ -179,6 +179,46 @@ def send_media_message(conversation, file_url, content_type, caption=None):
 
 
 @frappe.whitelist()
+def list_stickers():
+	"""Enabled catalog entries for the compose picker's "Figurinhas" tab (Entrega
+	13) -- read-only, no size/dimension re-check here, that already happened at
+	catalog-save time in whatsapp_sticker.py::validate.
+	"""
+	return frappe.get_list(
+		"WhatsApp Sticker",
+		filters={"enabled": 1},
+		fields=["name", "pack", "title", "image", "is_animated"],
+		order_by="pack asc, title asc",
+	)
+
+
+@frappe.whitelist()
+def send_sticker_message(conversation, sticker):
+	"""Sends a catalog sticker -- unlike send_media_message, the file isn't a
+	fresh operator upload, it's an existing WhatsApp Sticker record (already
+	validated as WebP/512x512/size-capped at catalog-save time). Actual Graph
+	API payload assembly happens in client/stickers.py's
+	WhatsAppMessageStickerMixin.notify(), the same extend_doctype_class
+	override point client/groups.py uses for a group send.
+	"""
+	conv = frappe.get_doc("WhatsApp Conversation", conversation)
+	image = frappe.db.get_value("WhatsApp Sticker", {"name": sticker, "enabled": 1}, "image")
+	if not image:
+		frappe.throw(_("Figurinha não encontrada ou desativada."))
+
+	doc = frappe.new_doc("WhatsApp Message")
+	doc.type = "Outgoing"
+	doc.content_type = "sticker"
+	doc.to = conv.wa_id
+	doc.attach = image
+	doc.reference_doctype = "WhatsApp Conversation"
+	doc.reference_name = conv.name
+	doc.insert()  # frappe_whatsapp's before_insert triggers the actual send via send_outgoing()
+
+	return doc.name
+
+
+@frappe.whitelist()
 def list_templates(channel):
 	"""Approved templates available to start a new conversation on this channel —
 	Meta only allows a business-initiated conversation via one of these (or within

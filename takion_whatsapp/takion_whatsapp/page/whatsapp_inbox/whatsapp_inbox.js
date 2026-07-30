@@ -39,8 +39,8 @@ const SANDBOX_PHONE_NUMBER = '000000000000';
 // (MIT), fetched lazily on first picker open, not embedded here. Plain
 // UTF-8 text either way (no image assets), so any of these already
 // send/render fine today via send_message with zero extra backend work.
-// Distinct from stickers (WebP image messages, a real gap — see
-// [[takion_whatsapp_feature_backlog]]).
+// Distinct from stickers (WebP image messages, own catalog + send/receive
+// pipeline — see client/stickers.py and the "Figurinhas" mode tab below).
 const WA_EMOJI_CATEGORY_ICONS = ['😀', '👋', '🐶', '🍔', '✈️', '⚽', '💡', '🔣', '🚩'];
 
 takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
@@ -411,6 +411,8 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 			.wa-active-match-row .wa-bubble { outline: 2px solid var(--orange-400, #ff9f43); }
 			.wa-thread-header-top { display: flex; justify-content: space-between; align-items: center; }
 			.wa-bubble-img { cursor: zoom-in; }
+			.wa-bubble-sticker-wrap { background: transparent !important; box-shadow: none !important; padding: 0 !important; }
+			.wa-bubble-sticker { width: 128px; height: 128px; display: block; }
 			.wa-lightbox-overlay {
 				position: fixed; inset: 0; background: rgba(0,0,0,.85); z-index: 1100;
 				display: flex; align-items: center; justify-content: center; cursor: zoom-out;
@@ -432,6 +434,11 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 				transition: opacity 150ms ease, transform 150ms ease;
 			}
 			.wa-emoji-picker.open { opacity: 1; transform: translateY(0) scale(1); pointer-events: auto; }
+			.wa-picker-mode-tabs { display: flex; border-bottom: 1px solid var(--border-color); flex-shrink: 0; }
+			.wa-picker-mode-tab { flex: 1; text-align: center; cursor: pointer; padding: 6px 0; font-size: 15px; border-bottom: 2px solid transparent; transition: background 120ms ease; }
+			.wa-picker-mode-tab:hover { background: var(--fg-hover-color); }
+			.wa-picker-mode-tab.active { border-bottom-color: var(--primary, #5b8def); }
+			.wa-picker-body { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
 			.wa-emoji-tabs { display: flex; border-bottom: 1px solid var(--border-color); padding: 4px; flex-shrink: 0; }
 			.wa-emoji-tab { flex: 1; text-align: center; cursor: pointer; padding: 4px 0; border-radius: 4px; font-size: 15px; transition: background 120ms ease; }
 			.wa-emoji-tab:hover { background: var(--fg-hover-color); }
@@ -440,6 +447,9 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 			.wa-emoji-option { cursor: pointer; text-align: center; padding: 3px; border-radius: 4px; font-size: 16px; line-height: 1.4; }
 			.wa-emoji-option:hover { background: var(--fg-hover-color); }
 			.wa-emoji-loading { padding: 10px; font-size: 12px; color: var(--text-muted); }
+			.wa-sticker-grid { flex: 1; overflow-y: auto; padding: 6px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; align-content: start; }
+			.wa-sticker-option { width: 100%; aspect-ratio: 1; cursor: pointer; border-radius: 4px; transition: background 120ms ease; }
+			.wa-sticker-option:hover { background: var(--fg-hover-color); }
 			.wa-status-filter { position: relative; }
 			.wa-status-filter-toggle { white-space: nowrap; }
 			.wa-status-filter-menu {
@@ -642,8 +652,10 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 			if (!was_open) this.toggle_emoji_picker();
 		});
 		main.on('click', '.wa-emoji-picker', (e) => e.stopPropagation());
+		main.on('click', '.wa-picker-mode-tab', (e) => this.set_picker_mode($(e.currentTarget).data('mode')));
 		main.on('click', '.wa-emoji-tab', (e) => this.render_emoji_picker(+$(e.currentTarget).data('index')));
 		main.on('click', '.wa-emoji-option', (e) => this.insert_emoji_at_cursor($(e.currentTarget).text()));
+		main.on('click', '.wa-sticker-option', (e) => this.send_sticker($(e.currentTarget).data('sticker')));
 		// Closes any open dropdown (status filter, "Novo"/attach menu, emoji picker)
 		// on a click outside it — namespaced since this page instance is created
 		// once per session and never torn down (same as every other listener here).
@@ -858,7 +870,7 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 			fields: [
 				{
 					fieldname: 'content_type', fieldtype: 'Select', label: __('Tipo'),
-					options: ['text', 'image', 'video', 'document', 'audio'].join('\n'),
+					options: ['text', 'image', 'video', 'document', 'audio', 'sticker'].join('\n'),
 					default: 'text', reqd: 1,
 				},
 				{ fieldname: 'message', fieldtype: 'Small Text', label: __('Mensagem / legenda') },
@@ -1331,9 +1343,13 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 			? this.render_audio_bubble(msg)
 			: this.render_generic_bubble(msg);
 
+		// Stickers render without the chat-bubble background/shadow, same as
+		// WhatsApp's own UI -- everything else keeps the normal bubble chrome.
+		const bubble_class = msg.content_type === 'sticker' ? 'wa-bubble wa-bubble-sticker-wrap' : 'wa-bubble';
+
 		return `
 			<div class="wa-bubble-row ${out ? 'out' : 'in'}" data-message="${frappe.utils.escape_html(msg.name)}">
-				<div class="wa-bubble">
+				<div class="${bubble_class}">
 					${sender}
 					${body}
 					<div class="wa-bubble-time">${time}${check}</div>
@@ -1374,6 +1390,11 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 					: frappe.utils.escape_html(msg.message)
 			}</div>`
 			: '';
+		if (msg.content_type === 'sticker' && msg.attach) {
+			// No caption support (see WhatsApp Cloud API's Sticker Message reference)
+			// and no bubble chrome, same as WhatsApp's own rendering of stickers.
+			return `<img class="wa-bubble-sticker" src="${frappe.utils.escape_html(msg.attach)}" alt="${__('Figurinha')}">`;
+		}
 		if (msg.content_type === 'image' && msg.attach) {
 			return `<img class="wa-bubble-img" src="${frappe.utils.escape_html(msg.attach)}" style="max-width:220px;border-radius:4px;">${caption}`;
 		}
@@ -1440,36 +1461,100 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 
 	// Full 1914-emoji, 9-category set, fetched once (lazily, on first open) from
 	// the vendored JSON — see WA_EMOJI_CATEGORY_ICONS' comment for provenance.
+	// Entrega 13 ("Figurinhas") adds a 2nd mode alongside emoji -- a top-level
+	// Emoji/Figurinhas switch, structurally the same idea as the WhatsApp
+	// Business App's own Emoji/GIF/Sticker tab row (no GIF here, only 2 modes).
 	async toggle_emoji_picker() {
 		const $picker = this.page.body.find('.wa-emoji-picker');
 		if ($picker.hasClass('open')) {
 			$picker.removeClass('open');
 			return;
 		}
-		if (!this.emoji_categories) {
-			$picker.html('<div class="wa-emoji-loading">Carregando…</div>').addClass('open');
-			try {
-				const res = await fetch('/assets/takion_whatsapp/js/lib/emoji-data.json');
-				this.emoji_categories = await res.json();
-			} catch (e) {
-				$picker.html('<div class="wa-emoji-loading">Não foi possível carregar os emojis.</div>');
-				return;
-			}
+		if (!$picker.find('.wa-picker-mode-tabs').length) {
+			$picker.html(`
+				<div class="wa-picker-mode-tabs">
+					<span class="wa-picker-mode-tab active" data-mode="emoji" title="${__('Emoji')}">😀</span>
+					<span class="wa-picker-mode-tab" data-mode="sticker" title="${__('Figurinhas')}">🏷️</span>
+				</div>
+				<div class="wa-picker-body"></div>
+			`);
 		}
-		this.render_emoji_picker(this.emoji_active_category || 0);
 		$picker.addClass('open');
+		await this.set_picker_mode(this.picker_mode || 'emoji');
+	}
+
+	async set_picker_mode(mode) {
+		this.picker_mode = mode;
+		this.page.body.find('.wa-picker-mode-tab').removeClass('active').filter(`[data-mode="${mode}"]`).addClass('active');
+		if (mode === 'sticker') {
+			await this.render_sticker_picker();
+		} else {
+			await this.load_emoji_categories();
+			this.render_emoji_picker(this.emoji_active_category || 0);
+		}
+	}
+
+	async load_emoji_categories() {
+		if (this.emoji_categories) return;
+		const $body = this.page.body.find('.wa-picker-body');
+		$body.html('<div class="wa-emoji-loading">Carregando…</div>');
+		try {
+			const res = await fetch('/assets/takion_whatsapp/js/lib/emoji-data.json');
+			this.emoji_categories = await res.json();
+		} catch (e) {
+			$body.html('<div class="wa-emoji-loading">Não foi possível carregar os emojis.</div>');
+		}
 	}
 
 	render_emoji_picker(category_index) {
+		if (!this.emoji_categories) return;
 		this.emoji_active_category = category_index;
-		const $picker = this.page.body.find('.wa-emoji-picker');
+		const $body = this.page.body.find('.wa-picker-body');
 		const tabs = this.emoji_categories
 			.map((cat, i) => `<span class="wa-emoji-tab${i === category_index ? ' active' : ''}" data-index="${i}" title="${frappe.utils.escape_html(cat.name)}">${WA_EMOJI_CATEGORY_ICONS[i] || '•'}</span>`)
 			.join('');
 		const grid = this.emoji_categories[category_index].emojis
 			.map(([emoji, name]) => `<span class="wa-emoji-option" title="${frappe.utils.escape_html(name)}">${emoji}</span>`)
 			.join('');
-		$picker.html(`<div class="wa-emoji-tabs">${tabs}</div><div class="wa-emoji-grid">${grid}</div>`);
+		$body.html(`<div class="wa-emoji-tabs">${tabs}</div><div class="wa-emoji-grid">${grid}</div>`);
+	}
+
+	// Catalog is admin-managed (WhatsApp Sticker list) -- fetched once per page
+	// session, same lazy-cache pattern as emoji_categories. Clicking a sticker
+	// sends it immediately (like WhatsApp's own picker), it isn't inserted into
+	// the compose box first -- stickers have no caption/text to combine with.
+	async render_sticker_picker() {
+		const $body = this.page.body.find('.wa-picker-body');
+		if (!this.stickers) {
+			$body.html('<div class="wa-emoji-loading">Carregando…</div>');
+			try {
+				const r = await frappe.call({ method: 'takion_whatsapp.client.inbox.list_stickers' });
+				this.stickers = r.message || [];
+			} catch (e) {
+				$body.html('<div class="wa-emoji-loading">Não foi possível carregar as figurinhas.</div>');
+				return;
+			}
+		}
+		if (!this.stickers.length) {
+			$body.html(`<div class="wa-emoji-loading">${__('Nenhuma figurinha cadastrada ainda. Um administrador pode cadastrar em WhatsApp Sticker.')}</div>`);
+			return;
+		}
+		const grid = this.stickers
+			.map((s) => `<img class="wa-sticker-option" data-sticker="${frappe.utils.escape_html(s.name)}" src="${frappe.utils.escape_html(s.image)}" title="${frappe.utils.escape_html(s.title || s.pack || '')}">`)
+			.join('');
+		$body.html(`<div class="wa-sticker-grid">${grid}</div>`);
+	}
+
+	send_sticker(sticker) {
+		if (!sticker || !this.current_conversation) return;
+		this.page.body.find('.wa-emoji-picker').removeClass('open');
+		frappe.call({
+			method: 'takion_whatsapp.client.inbox.send_sticker_message',
+			args: { conversation: this.current_conversation, sticker },
+		}).then(() => {
+			this.load_thread(this.current_conversation);
+			this.refresh_conversations();
+		});
 	}
 
 	insert_emoji_at_cursor(emoji) {

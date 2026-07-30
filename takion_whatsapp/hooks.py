@@ -152,6 +152,10 @@ doc_events = {
 			"takion_whatsapp.client.conversation.link_message_to_conversation",
 			"takion_whatsapp.client.optout.detect_optout",
 			"takion_whatsapp.client.attribution.capture_referral",
+			# Entrega 13 ("Figurinhas"): downloads the sticker file frappe_whatsapp's
+			# own webhook handler never does for content_type == "sticker" -- no
+			# ordering dependency on the other three above, appended last.
+			"takion_whatsapp.client.stickers.fetch_incoming_sticker",
 		],
 		"on_update": "takion_whatsapp.client.pricing.capture_pricing",
 	},
@@ -205,6 +209,12 @@ fixtures = [
 	{"dt": "Custom Field", "filters": [["dt", "=", "WhatsApp Recipient"], ["fieldname", "=", "send_status"]]},
 	{"dt": "Custom Field", "filters": [["dt", "=", "WhatsApp Recipient List"], ["fieldname", "in", ["auto_refresh", "refresh_frequency_hours", "last_refreshed_at"]]]},
 	{"dt": "Custom Field", "filters": [["dt", "=", "Bulk WhatsApp Message"], ["fieldname", "=", "utm_campaign"]]},
+	# Entrega 13 ("Figurinhas"): Property Setters widening content_type's Select
+	# options and attach's depends_on on the same third-party "WhatsApp Message"
+	# doctype -- created idempotently by after_migrate below
+	# (client/setup.py::_create_property_setters), this entry only exports the
+	# resulting records for a completely fresh install.
+	{"dt": "Property Setter", "filters": [["doc_type", "=", "WhatsApp Message"], ["field_name", "in", ["content_type", "attach"]]]},
 ]
 
 # after_migrate
@@ -263,11 +273,23 @@ scheduler_events = {
 # recipient_type: "group" is never set there (see client/groups.py's mixin
 # docstring for why notify() specifically, not send_outgoing(), is the
 # override point).
+#
+# Entrega 13 ("Figurinhas"): WhatsAppMessageStickerMixin patches the same kind
+# of gap for a sticker send -- send_outgoing() never builds a `sticker` key in
+# the payload for content_type == "sticker" (see client/stickers.py's mixin
+# docstring). Two mixins on the same doctype: both override notify() and both
+# call super().notify(data), so frappe's extend_doctype_class chains them (see
+# frappe/model/base_document.py::_get_extended_class) regardless of list
+# order -- each just adds its own key and delegates down to the next one,
+# ending at frappe_whatsapp's real HTTP call.
 extend_doctype_class = {
 	"Lead": "takion_whatsapp.client.pipeline.LeadMixin",
 	"Bulk WhatsApp Message": "takion_whatsapp.client.broadcast.BulkWhatsAppMessageMixin",
 	"WhatsApp Recipient List": "takion_whatsapp.client.segments.WhatsAppRecipientListMixin",
-	"WhatsApp Message": "takion_whatsapp.client.groups.WhatsAppMessageGroupSendMixin",
+	"WhatsApp Message": [
+		"takion_whatsapp.client.groups.WhatsAppMessageGroupSendMixin",
+		"takion_whatsapp.client.stickers.WhatsAppMessageStickerMixin",
+	],
 }
 
 # Overriding Methods

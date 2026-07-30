@@ -8,6 +8,7 @@ completely fresh install where after_migrate hasn't run yet either.
 """
 import frappe
 from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
+from frappe.custom.doctype.property_setter.property_setter import make_property_setter
 
 CUSTOM_FIELDS = {
 	"WhatsApp Message": [
@@ -98,8 +99,48 @@ CUSTOM_FIELDS = {
 	],
 }
 
+# Entrega 13 ("Figurinhas"): frappe_whatsapp's own WhatsApp Message.content_type
+# Select field has no "sticker" option (and never will -- third-party doctype),
+# so it's widened via Property Setter instead of a Custom Field (this modifies
+# an EXISTING field's property, not adding a new one). attach's depends_on is
+# widened too, so the Attach field shows in the desk form for a sticker
+# message the same as it already does for image/video/document/audio -- see
+# frappe-syntax-doctypes' Property Setter reference for both mechanisms.
+PROPERTY_SETTERS = [
+	{
+		"doctype": "WhatsApp Message",
+		"fieldname": "content_type",
+		"property": "options",
+		"value": "text\ndocument\nimage\nvideo\naudio\nflow\nreaction\nlocation\ncontact\nbutton\ninteractive\norder\nsticker",
+		"property_type": "Text",
+	},
+	{
+		"doctype": "WhatsApp Message",
+		"fieldname": "attach",
+		"property": "depends_on",
+		"value": (
+			"eval:(doc.content_type=='audio' || doc.content_type=='video' || "
+			"doc.content_type=='document' || doc.content_type=='image' || "
+			"doc.content_type=='sticker' || doc.message_type=='Template')"
+		),
+		"property_type": "Small Text",
+	},
+]
+
+
+def _create_property_setters():
+	for ps in PROPERTY_SETTERS:
+		if frappe.db.exists(
+			"Property Setter",
+			{"doc_type": ps["doctype"], "field_name": ps["fieldname"], "property": ps["property"]},
+		):
+			continue
+		make_property_setter(ps["doctype"], ps["fieldname"], ps["property"], ps["value"], ps["property_type"])
+
 
 def after_migrate():
 	create_custom_fields(CUSTOM_FIELDS)
+	_create_property_setters()
 	for doctype in CUSTOM_FIELDS:
 		frappe.clear_cache(doctype=doctype)
+	frappe.clear_cache(doctype="WhatsApp Message")

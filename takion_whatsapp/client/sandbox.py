@@ -1,6 +1,6 @@
 """Sandbox de teste manual — cria e gerencia um WhatsApp Account/Channel/Conversation
 FICTÍCIOS, claramente rotulados, pra exercitar as funções já construídas (enviar
-texto/áudio/imagem/vídeo/documento, receber mensagem, SLA, custo, funil) sem
+texto/áudio/imagem/vídeo/documento/figurinha, receber mensagem, SLA, custo, funil) sem
 depender do número real de teste da Meta (WA-1, ver takion_whatsapp_wa1_status
 na memória do projeto — ainda pendente).
 
@@ -34,7 +34,7 @@ SANDBOX_PHONE_NUMBER = "000000000000"
 SANDBOX_DISPLAY_NAME = "🧪 Sandbox de Teste"
 SANDBOX_TAG = "WhatsApp Sandbox"
 
-SIMULATABLE_CONTENT_TYPES = ("text", "image", "video", "document", "audio")
+SIMULATABLE_CONTENT_TYPES = ("text", "image", "video", "document", "audio", "sticker")
 
 
 @frappe.whitelist()
