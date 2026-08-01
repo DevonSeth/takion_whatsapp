@@ -204,6 +204,23 @@ fixtures = [
 	{"dt": "Appointment Booking Settings"},
 	{"dt": "Number Card", "filters": [["module", "=", "Takion WhatsApp"]]},
 	{"dt": "Dashboard Chart", "filters": [["module", "=", "Takion WhatsApp"]]},
+	# 2026-08-01: consolidated every WhatsApp-related doctype/page from both
+	# frappe_whatsapp and takion_whatsapp into ONE categorized workspace
+	# ("WhatsApp", nested under "Comunicacao") instead of two separate,
+	# flat, auto-generated module dumps. The "Takion WhatsApp" app-switcher
+	# entry's own bare-module-listing fallback is separately fixed by a
+	# NATIVE (non-fixture) workspace file -- see
+	# takion_whatsapp/workspace/takion_whatsapp_home/ -- because Frappe's
+	# orphan-workspace cleanup (frappe/model/sync.py::remove_orphan_entities)
+	# deletes any public workspace with both `module` and `app` set unless
+	# it's shipped as a real <app>/<module>/workspace/<name>/<name>.json
+	# file, not merely fixture-imported (confirmed by two failed attempts
+	# at redirect workspaces here, auto-deleted on the very next migrate).
+	# The "Frappe Whatsapp" module's own equivalent fallback can't be fixed
+	# the same way without forking frappe_whatsapp (that file would have to
+	# live inside ITS module folder) -- and the literal "Frappe Whatsapp"
+	# text in a document's own breadcrumb trail is that DocType's `module`
+	# field either way, baked into frappe_whatsapp's own doctype JSON.
 	{"dt": "Workspace", "filters": [["name", "=", "WhatsApp"]]},
 	# Entrega 8: origin_doctype/origin_name Custom Fields on frappe_whatsapp's
 	# "WhatsApp Message" -- actually created idempotently by after_migrate below
