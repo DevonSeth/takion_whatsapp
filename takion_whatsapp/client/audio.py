@@ -1,18 +1,26 @@
 """WebM/Opus -> OGG/Opus conversion for operator-recorded voice notes.
 
-The browser's MediaRecorder API only produces WebM/Opus, but Meta only renders
-a message as a native voice-note bubble (instead of a generic downloadable
-file) when it's OGG with the Opus codec — see
-takion_whatsapp_whatsapp_feature_backlog item 4 for the sourced constraint.
-This runs in the background (queue "short") so the operator's browser isn't
-blocked on the ffmpeg subprocess; the actual send afterwards reuses
-frappe_whatsapp's existing content_type="audio" path unchanged (same as
-client.inbox.send_message's text path).
+The browser's MediaRecorder API only produces WebM/Opus, but Meta requires
+OGG with the Opus codec for a voice message. That format is necessary but not
+sufficient for the native voice-note bubble (compact waveform, mic-icon
+avatar) instead of a generic audio-file attachment — confirmed 2026-08-01
+against a real recipient that a correctly-encoded OGG/Opus file sent via
+send_outgoing()'s plain `{"audio": {"link": ...}}` still rendered as a
+generic file. Meta's Cloud API needs an explicit `"voice": true` in the
+`audio` object (undocumented in the WhatsApp Business Platform overview,
+confirmed via developers.facebook.com's audio-messages reference) — that's
+what WhatsAppMessageVoiceNoteMixin below adds, since frappe_whatsapp's own
+send_outgoing() never sets it. This conversion step runs in the background
+(queue "short") so the operator's browser isn't blocked on the ffmpeg
+subprocess; the actual send afterwards reuses frappe_whatsapp's existing
+content_type="audio" path (same as client.inbox.send_message's text path),
+with the mixin's notify() override adding the missing flag.
 """
 import os
 import subprocess
 
 import frappe
+from frappe.model.document import Document
 from frappe.utils.file_manager import save_file
 
 # 24kbps mono Opus keeps a 120s recording (the client-side cap) around 360KB —
@@ -68,3 +76,17 @@ def convert_and_send(conversation, file_url):
 		# both already wired for every WhatsApp Message, nothing extra needed here.
 	finally:
 		frappe.delete_doc("File", webm_file.name, ignore_permissions=True)
+
+
+class WhatsAppMessageVoiceNoteMixin(Document):
+	"""notify(self, data) is the surgical override point -- same pattern as
+	client/stickers.py's WhatsAppMessageStickerMixin and client/groups.py's
+	WhatsAppMessageGroupSendMixin. send_outgoing() already builds
+	`data["audio"] = {"link": link}` for content_type == "audio"; this only
+	adds the one missing `voice` key so Meta renders the native voice-note
+	bubble instead of a generic audio-file attachment.
+	"""
+	def notify(self, data):
+		if self.content_type == "audio" and "audio" in data:
+			data["audio"]["voice"] = True
+		super().notify(data)

@@ -308,8 +308,16 @@ scheduler_events = {
 # Entrega 13 ("Figurinhas"): WhatsAppMessageStickerMixin patches the same kind
 # of gap for a sticker send -- send_outgoing() never builds a `sticker` key in
 # the payload for content_type == "sticker" (see client/stickers.py's mixin
-# docstring). Two mixins on the same doctype: both override notify() and both
-# call super().notify(data), so frappe's extend_doctype_class chains them (see
+# docstring).
+#
+# WhatsAppMessageVoiceNoteMixin (2026-08-01): send_outgoing() builds
+# `data["audio"] = {"link": link}` for content_type == "audio" but never sets
+# `voice: true` -- without it Meta renders even a correctly-encoded OGG/Opus
+# file as a generic audio-file attachment, not the native voice-note bubble
+# (see client/audio.py's mixin docstring).
+#
+# All three mixins on WhatsApp Message override notify() and call
+# super().notify(data), so frappe's extend_doctype_class chains them (see
 # frappe/model/base_document.py::_get_extended_class) regardless of list
 # order -- each just adds its own key and delegates down to the next one,
 # ending at frappe_whatsapp's real HTTP call.
@@ -320,6 +328,7 @@ extend_doctype_class = {
 	"WhatsApp Message": [
 		"takion_whatsapp.client.groups.WhatsAppMessageGroupSendMixin",
 		"takion_whatsapp.client.stickers.WhatsAppMessageStickerMixin",
+		"takion_whatsapp.client.audio.WhatsAppMessageVoiceNoteMixin",
 	],
 }
 

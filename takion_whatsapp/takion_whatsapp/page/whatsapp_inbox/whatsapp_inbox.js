@@ -242,7 +242,16 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 			.wa-conversation-time { font-weight: 400; font-size: 11px; color: var(--text-muted); }
 			.wa-conversation-preview { font-size: 12px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 			.wa-conversation-meta { margin-top: 4px; display: flex; gap: 4px; align-items: center; }
-			.wa-thread { flex: 1; display: flex; flex-direction: column; background: var(--subtle-fg); min-width: 0; }
+			.wa-thread { flex: 1; display: flex; flex-direction: column; background: var(--subtle-fg); min-width: 0; position: relative; }
+			/* Drag-and-drop overlay -- toggled via a counter (dragenter/dragleave fire
+			   repeatedly as the cursor crosses child elements), see bind_events(). */
+			.wa-thread-dragover::after {
+				content: "Solte para anexar"; position: absolute; inset: 0; z-index: 20;
+				display: flex; align-items: center; justify-content: center;
+				background: color-mix(in srgb, var(--primary, #5b8def) 12%, transparent);
+				border: 2px dashed var(--primary, #5b8def); pointer-events: none;
+				font-size: 14px; font-weight: 600; color: var(--primary, #5b8def);
+			}
 			/* Header/compose are chrome, not canvas -- need their own surface color
 			   (var(--card-bg)) so they read as elevated above .wa-thread's canvas
 			   background instead of blending into it (both previously had no
@@ -751,6 +760,55 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 		main.on('change', '.wa-media-file-input', (e) => this.on_media_file_selected(e.target.files[0]));
 		main.on('click', '.wa-media-cancel', () => this.discard_media());
 		main.on('click', '.wa-media-send', () => this.send_media());
+		main.on('keydown', '.wa-media-caption', (e) => {
+			if (e.key === 'Enter') {
+				e.preventDefault();
+				this.send_media();
+			}
+		});
+
+		// Pasting an image (or any file) copied to the clipboard -- e.g. a
+		// screenshot -- goes through the same on_media_file_selected() the
+		// attach-menu file input uses, so it gets the same preview/caption/size-cap
+		// handling. Only intercepted when the clipboard actually carries a file;
+		// a plain text paste falls through untouched.
+		main.on('paste', '.wa-compose-input', (e) => {
+			const clipboard = e.originalEvent.clipboardData;
+			const item = clipboard && Array.from(clipboard.items).find((i) => i.kind === 'file');
+			if (!item) return;
+			e.preventDefault();
+			this.on_media_file_selected(item.getAsFile());
+		});
+
+		// Drag-and-drop over the whole thread panel (messages + compose), not just
+		// the compose bar, since that's the bigger and more discoverable target --
+		// same as WhatsApp Web itself. dragenter/dragleave fire repeatedly as the
+		// cursor crosses child elements, so a counter (rather than a plain
+		// enter/leave toggle) is needed to avoid the overlay flickering.
+		main.on('dragenter', '.wa-thread', (e) => {
+			if (!this.current_conversation) return;
+			e.preventDefault();
+			this._drag_counter = (this._drag_counter || 0) + 1;
+			this.page.body.find('.wa-thread').addClass('wa-thread-dragover');
+		});
+		main.on('dragover', '.wa-thread', (e) => {
+			if (!this.current_conversation) return;
+			e.preventDefault();
+			e.originalEvent.dataTransfer.dropEffect = 'copy';
+		});
+		main.on('dragleave', '.wa-thread', (e) => {
+			e.preventDefault();
+			this._drag_counter = Math.max(0, (this._drag_counter || 0) - 1);
+			if (this._drag_counter === 0) this.page.body.find('.wa-thread').removeClass('wa-thread-dragover');
+		});
+		main.on('drop', '.wa-thread', (e) => {
+			e.preventDefault();
+			this._drag_counter = 0;
+			this.page.body.find('.wa-thread').removeClass('wa-thread-dragover');
+			if (!this.current_conversation) return;
+			const file = e.originalEvent.dataTransfer.files[0];
+			if (file) this.on_media_file_selected(file);
+		});
 
 		main.on('change', '.wa-status-select', (e) => {
 			frappe.db.set_value('WhatsApp Conversation', this.current_conversation, 'status', e.target.value)
