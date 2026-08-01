@@ -1055,7 +1055,7 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 		$list.html(conversations.map((c) => {
 			const title = frappe.utils.escape_html(c.contact || c.phone_number_display || c.name);
 			const preview = frappe.utils.escape_html(c.last_message_preview || '');
-			const when = c.last_message_at ? frappe.datetime.str_to_user(c.last_message_at, true) : '';
+			const when = c.last_message_at ? this.format_bubble_time(c.last_message_at) : '';
 			const active = c.name === this.current_conversation ? ' active' : '';
 			const unread = c.is_unread ? ' unread' : '';
 			const direction_icon = c.last_direction === 'Outbound' ? '↗' : '↙';
@@ -1329,9 +1329,26 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 		});
 	}
 
+	// Bugfix 2026-08-01: frappe.datetime.str_to_user(val, true)'s only_time
+	// branch parses `val` with moment(val, frappe.defaultTimeFormat) -- a
+	// TIME-only format pattern ("HH:mm:ss") applied to a full datetime
+	// string ("2026-08-01 12:03:29.738624"), which moment mis-parses,
+	// producing wrong hours (seen: showing 20:03 for a message actually
+	// sent at 12:03 local time). Goes through the same
+	// moment.tz(system)->tz(user) conversion str_to_user's own datetime
+	// branch uses (the only one that's actually correct), then formats
+	// just the time -- HH:mm, no seconds, per user's explicit ask (seconds
+	// stay intact in the underlying `creation` field for reports/logs,
+	// this only affects the bubble timestamp's display).
+	format_bubble_time(datetime_str) {
+		const system_datetime = moment.tz(datetime_str, frappe.defaultDatetimeFormat, frappe.boot.time_zone.system);
+		const user_datetime = system_datetime.clone().tz(frappe.boot.time_zone.user);
+		return user_datetime.format('HH:mm');
+	}
+
 	render_message(msg) {
 		const out = msg.type === 'Outgoing';
-		const time = frappe.datetime.str_to_user(msg.creation, true);
+		const time = this.format_bubble_time(msg.creation);
 		const check = out ? this.render_check(msg.status) : '';
 		// Group threads can have several distinct senders in one conversation
 		// (unlike 1:1, where "who sent this" is never ambiguous) -- labeled only
@@ -2130,7 +2147,7 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 		return `
 			<a class="wa-media-link-item" href="${frappe.utils.escape_html(url)}" target="_blank">
 				<div class="wa-media-link-text">${frappe.utils.escape_html(m.message || '')}</div>
-				<div class="wa-media-link-date">${frappe.datetime.str_to_user(m.creation, true)}</div>
+				<div class="wa-media-link-date">${this.format_bubble_time(m.creation)}</div>
 			</a>
 		`;
 	}
