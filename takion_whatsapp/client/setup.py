@@ -125,6 +125,75 @@ PROPERTY_SETTERS = [
 		),
 		"property_type": "Small Text",
 	},
+	# Bugfix 2026-08-01: frappe_whatsapp's own "WhatsApp Account" ships
+	# webhook_verify_token as a plain Data field with no explicit `length`,
+	# so it inherits Frappe's 140-char varchar default. Meta itself never
+	# constrains this value (it's a string the developer picks in the App
+	# Dashboard, not something Meta issues), so nothing stops a real access
+	# token -- or a much longer verify string -- from being typed in and
+	# hitting CharacterLengthExceededError on save. Widened defensively;
+	# see also the two description Property Setters below clarifying which
+	# field is which (this is where the field got confused with `token`,
+	# the actual Meta-issued access token, in practice).
+	{
+		"doctype": "WhatsApp Account",
+		"fieldname": "webhook_verify_token",
+		"property": "length",
+		"value": "500",
+		"property_type": "Int",
+	},
+	{
+		"doctype": "WhatsApp Account",
+		"fieldname": "webhook_verify_token",
+		"property": "description",
+		"value": (
+			"String arbitrária que VOCÊ escolhe e digita na configuração de webhook do "
+			"App Dashboard da Meta (\"Verify Token\") -- a Meta não emite nem restringe "
+			"esse valor. NÃO é o access token; esse vai no campo Token acima."
+		),
+		"property_type": "Small Text",
+	},
+	# Bugfix 2026-08-01: phone_id/app_id/business_id are numeric-looking but
+	# Meta's own API always represents them as JSON strings (see Graph API
+	# webhook payload / phone number examples), specifically so clients don't
+	# lose precision or overflow parsing 15-19 digit IDs as native numbers.
+	# They are already correctly typed as Data here (not Int) -- these
+	# description Property Setters exist only to stop that from being
+	# "corrected" to Int/Float/Currency by a future Customize Form edit,
+	# which would overflow (int columns) or lose precision (float/currency)
+	# on real Meta IDs.
+	{
+		"doctype": "WhatsApp Account",
+		"fieldname": "phone_id",
+		"property": "description",
+		"value": (
+			"phone_number_id da Meta. Parece número mas é sempre string na API da Meta "
+			"-- nunca mude o tipo deste campo pra Int/Float/Currency, valores reais "
+			"(15-19 dígitos) estouram o range de Int e perdem precisão como Float/Currency."
+		),
+		"property_type": "Small Text",
+	},
+	{
+		"doctype": "WhatsApp Account",
+		"fieldname": "app_id",
+		"property": "description",
+		"value": (
+			"App ID da Meta. Parece número mas é sempre string na API da Meta -- nunca "
+			"mude o tipo deste campo pra Int/Float/Currency, ver descrição do phone_id."
+		),
+		"property_type": "Small Text",
+	},
+	{
+		"doctype": "WhatsApp Account",
+		"fieldname": "business_id",
+		"property": "description",
+		"value": (
+			"ID da WhatsApp Business Account (WABA) da Meta. Parece número mas é sempre "
+			"string na API da Meta -- nunca mude o tipo deste campo pra Int/Float/"
+			"Currency, ver descrição do phone_id."
+		),
+		"property_type": "Small Text",
+	},
 ]
 
 
@@ -144,3 +213,4 @@ def after_migrate():
 	for doctype in CUSTOM_FIELDS:
 		frappe.clear_cache(doctype=doctype)
 	frappe.clear_cache(doctype="WhatsApp Message")
+	frappe.clear_cache(doctype="WhatsApp Account")

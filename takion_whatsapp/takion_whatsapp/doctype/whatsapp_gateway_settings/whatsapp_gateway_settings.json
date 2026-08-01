@@ -13,12 +13,14 @@
  ],
  "fields": [
   {
+   "description": "Chave secreta do app na Meta, usada para validar a assinatura dos webhooks recebidos.",
    "fieldname": "meta_app_secret",
    "fieldtype": "Password",
    "label": "Meta App Secret",
    "reqd": 1
   },
   {
+   "description": "Token de verificação do webhook — você mesmo escolhe esse valor, a Meta não define nem restringe.",
    "fieldname": "meta_verify_token",
    "fieldtype": "Password",
    "label": "Meta Verify Token",

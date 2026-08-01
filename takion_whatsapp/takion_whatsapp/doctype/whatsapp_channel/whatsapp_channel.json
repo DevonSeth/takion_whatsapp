@@ -23,7 +23,7 @@
  ],
  "fields": [
   {
-   "description": "Name of the linked frappe_whatsapp \"WhatsApp Account\" record (kept as plain text, not a Link, so this doctype has no hard dependency on frappe_whatsapp being installed on every site that has takion_whatsapp — e.g. the gateway site).",
+   "description": "Nome da Conta WhatsApp correspondente. Preenchido manualmente como texto (não é um vínculo automático).",
    "fieldname": "whatsapp_account",
    "fieldtype": "Data",
    "label": "WhatsApp Account",
@@ -51,15 +51,17 @@
    "label": "Display Phone Number"
   },
   {
-   "description": "Free text (not a Link to Company) for the same reason as WhatsApp Account above.",
+   "description": "Nome da empresa/cliente correspondente. Preenchido manualmente como texto (não é um vínculo automático).",
    "fieldname": "company",
    "fieldtype": "Data",
    "label": "Company"
   },
   {
+   "description": "Segredo compartilhado que autentica a comunicação entre este canal e o gateway central — não vem da Meta, você mesmo escolhe ou gera esse valor.",
    "fieldname": "internal_shared_secret",
    "fieldtype": "Password",
    "label": "Internal Shared Secret",
+   "length": 500,
    "reqd": 1
   },
   {
@@ -104,9 +106,11 @@
    "label": "Business ID"
   },
   {
+   "description": "Token do fluxo de cadastro automático (Embedded Signup) da Meta, reservado para uso futuro.",
    "fieldname": "embedded_signup_token",
    "fieldtype": "Password",
-   "label": "Embedded Signup Token"
+   "label": "Embedded Signup Token",
+   "length": 500
   }
  ],
  "index_web_pages_for_search": 1,

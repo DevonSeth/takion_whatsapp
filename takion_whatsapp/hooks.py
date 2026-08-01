@@ -43,7 +43,14 @@ app_license = "mit"
 # page_js = {"page" : "public/js/file.js"}
 
 # include js in doctype views
-# doctype_js = {"doctype" : "public/js/doctype.js"}
+# Bugfix 2026-08-01: layers a disable_password_checks() call onto
+# frappe_whatsapp's own "WhatsApp Account" form -- see
+# public/js/whatsapp_account_password_checks.js for the root-cause
+# explanation (zxcvbn + orjson 64-bit crash on long access tokens). This is
+# additive, not a fork: Frappe loads every installed app's doctype_js entry
+# for the same doctype, so frappe_whatsapp's own whatsapp_account.js (the
+# "Subscribe App to Webhooks" button) still runs too.
+doctype_js = {"WhatsApp Account": "public/js/whatsapp_account_password_checks.js"}
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
@@ -215,6 +222,13 @@ fixtures = [
 	# (client/setup.py::_create_property_setters), this entry only exports the
 	# resulting records for a completely fresh install.
 	{"dt": "Property Setter", "filters": [["doc_type", "=", "WhatsApp Message"], ["field_name", "in", ["content_type", "attach"]]]},
+	# Bugfix 2026-08-01: widen frappe_whatsapp's "WhatsApp Account".
+	# webhook_verify_token length (was truncating real Meta access tokens
+	# mistakenly typed into that field) and document phone_id/app_id/
+	# business_id as Meta string IDs, not numbers -- created idempotently by
+	# after_migrate below (client/setup.py::_create_property_setters), this
+	# entry only exports the resulting records for a completely fresh install.
+	{"dt": "Property Setter", "filters": [["doc_type", "=", "WhatsApp Account"], ["field_name", "in", ["webhook_verify_token", "phone_id", "app_id", "business_id"]]]},
 ]
 
 # after_migrate

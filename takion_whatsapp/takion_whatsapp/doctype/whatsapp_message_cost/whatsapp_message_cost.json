@@ -24,7 +24,7 @@
  ],
  "fields": [
   {
-   "description": "Name of the linked frappe_whatsapp \"WhatsApp Message\" record (kept as plain text, not a Link, so this doctype has no hard dependency on frappe_whatsapp being installed on every site that has takion_whatsapp — e.g. the gateway site).",
+   "description": "Nome da Mensagem WhatsApp correspondente. Preenchido automaticamente pelo sistema (não é um vínculo).",
    "fieldname": "whatsapp_message",
    "fieldtype": "Data",
    "label": "WhatsApp Message",

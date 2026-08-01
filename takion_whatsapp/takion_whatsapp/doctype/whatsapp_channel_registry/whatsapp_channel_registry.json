@@ -40,9 +40,11 @@
    "reqd": 1
   },
   {
+   "description": "Segredo compartilhado que autentica a comunicação entre este canal e o gateway central — não vem da Meta, você mesmo escolhe ou gera esse valor (precisa ser igual ao do canal correspondente).",
    "fieldname": "internal_shared_secret",
    "fieldtype": "Password",
    "label": "Internal Shared Secret",
+   "length": 500,
    "reqd": 1
   },
   {
