@@ -119,7 +119,12 @@ def create_group(channel, subject, description=None, join_approval_mode="auto_ap
 		frappe.throw(_("Descrição do grupo excede {0} caracteres.").format(DESCRIPTION_MAX_LENGTH))
 
 	account = _account_for_channel(channel)
-	payload = {"subject": subject, "join_approval_mode": join_approval_mode}
+	# messaging_product is required (confirmed live, 2026-08-02: Meta rejects the
+	# create call outright without it -- "Your request has violated JSON schema
+	# constraint 'required' ... missing : 'messaging_product'"). The original
+	# design research read the docs as not needing it for group MANAGEMENT calls
+	# (only message-sending ones) -- wrong, at least for create.
+	payload = {"messaging_product": "whatsapp", "subject": subject, "join_approval_mode": join_approval_mode}
 	if description:
 		payload["description"] = description
 
