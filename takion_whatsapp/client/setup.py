@@ -34,6 +34,21 @@ CUSTOM_FIELDS = {
 			"insert_after": "origin_doctype",
 			"read_only": 1,
 		},
+		{
+			"fieldname": "is_gif",
+			"fieldtype": "Check",
+			"label": "É GIF",
+			"insert_after": "attach",
+			"read_only": 1,
+			"description": (
+				"Meta's Cloud API has no distinct GIF message type -- a GIF sent from "
+				"WhatsApp's own app always arrives as content_type=video with no "
+				"distinguishing webhook field (confirmed live, 2026-08-02: identical "
+				"payload shape to a real recorded video). Set by "
+				"client/video.py::detect_gif_video from the one signal that does differ "
+				"in practice -- the downloaded file has no audio stream."
+			),
+		},
 	],
 	# Entrega 10 ("Transmissão Segura"): per-recipient pacing state -- only ever
 	# populated by client/broadcast.py's BulkWhatsAppMessageMixin, on the

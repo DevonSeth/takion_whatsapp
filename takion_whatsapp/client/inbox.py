@@ -66,15 +66,118 @@ def get_conversations(status=None, tag=None, assigned_to=None, unread_only=None)
 
 @frappe.whitelist()
 def get_thread(conversation):
-	return frappe.get_list(
+	messages = frappe.get_list(
 		"WhatsApp Message",
 		filters={
 			"reference_doctype": "WhatsApp Conversation",
 			"reference_name": conversation,
 		},
-		fields=["name", "type", "content_type", "message", "attach", "message_id", "status", "creation", "from", "profile_name"],
+		fields=[
+			"name", "type", "content_type", "message", "attach", "message_id", "status",
+			"creation", "from", "profile_name", "is_reply", "reply_to_message_id", "is_gif",
+		],
 		order_by="creation asc",
 	)
+	_attach_reply_previews(messages)
+	_attach_document_sizes(messages)
+	return _attach_reactions(messages)
+
+
+def _attach_document_sizes(messages):
+	"""Resolves each document message's file size (for the "Abrir"/"Salvar como..."
+	card's "XLSX • 46 KB" meta line, matching WhatsApp Web's own document bubble) --
+	not stored on WhatsApp Message itself, so a single batched File lookup keyed by
+	file_url, same batching approach as _attach_reply_previews above.
+	"""
+	file_urls = [m.attach for m in messages if m.content_type == "document" and m.attach]
+	if not file_urls:
+		return
+
+	size_by_url = {
+		f.file_url: f.file_size
+		for f in frappe.get_list("File", filters={"file_url": ["in", file_urls]}, fields=["file_url", "file_size"])
+	}
+	for m in messages:
+		if m.content_type == "document" and m.attach:
+			m["file_size"] = size_by_url.get(m.attach)
+
+
+def _attach_reactions(messages):
+	"""Meta reactions arrive/are sent as their own "reaction" content_type WhatsApp
+	Message (reply_to_message_id = the wamid being reacted to, message = the emoji,
+	or "" to remove a previously-sent one) -- they must never render as their own
+	bubble in the thread, only as a small badge on the message they target, same as
+	WhatsApp's own UI. Resolves that mapping and strips reaction rows out of the
+	returned list. Only the most recent reaction per (target wamid, direction) is
+	the current state -- an empty emoji is Meta's own "reaction removed" signal, and
+	each side (contact vs operator) can have at most one active reaction at a time.
+	"""
+	target_wamids = {m.message_id for m in messages if m.message_id}
+	reaction_rows = [m for m in messages if m.content_type == "reaction" and m.reply_to_message_id in target_wamids]
+	if not reaction_rows:
+		return messages
+
+	latest = {}
+	for r in sorted(reaction_rows, key=lambda m: m.creation):
+		latest[(r.reply_to_message_id, r.type)] = r
+
+	reactions_by_wamid = {}
+	for (wamid, _direction), r in latest.items():
+		if r.message:
+			reactions_by_wamid.setdefault(wamid, []).append({"emoji": r.message, "type": r.type})
+
+	reaction_names = {r.name for r in reaction_rows}
+	result = []
+	for m in messages:
+		if m.name in reaction_names:
+			continue
+		if m.message_id in reactions_by_wamid:
+			m["reactions"] = reactions_by_wamid[m.message_id]
+		result.append(m)
+	return result
+
+
+def _attach_reply_previews(messages):
+	"""Resolves each reply's quoted wamid into a lightweight preview (content_type/
+	message/profile_name) so the thread can render a WhatsApp-style quote strip
+	inside the reply bubble without a client-side round trip per message.
+	`is_reply`/`reply_to_message_id` are frappe_whatsapp's own fields (already
+	populated for an inbound reply); `send_message`/`send_media_message` below
+	set them for an outbound reply too, via `_apply_reply`.
+	"""
+	wamids = {m.reply_to_message_id for m in messages if m.is_reply and m.reply_to_message_id}
+	if not wamids:
+		return
+
+	quoted_by_wamid = {
+		q.message_id: q
+		for q in frappe.get_list(
+			"WhatsApp Message",
+			filters={"message_id": ["in", list(wamids)]},
+			fields=["name", "message_id", "content_type", "message", "profile_name", "type"],
+		)
+	}
+	for m in messages:
+		if m.is_reply and m.reply_to_message_id:
+			m["reply_preview"] = quoted_by_wamid.get(m.reply_to_message_id)
+
+
+def _apply_reply(doc, reply_to):
+	"""Sets the two fields frappe_whatsapp's own send_outgoing() already checks
+	(`if self.is_reply and self.reply_to_message_id: data["context"] = ...`) --
+	no new schema, no send_outgoing override needed. `reply_to` is the quoted
+	WhatsApp Message's docname; Meta's context needs its wamid, not our name.
+	Silently skipped (sent as a plain message) if the quoted message has no
+	wamid yet -- e.g. replying to an outgoing message Meta hasn't acknowledged
+	yet -- rather than failing the whole send over a quote that can't attach.
+	"""
+	if not reply_to:
+		return
+	quoted_message_id = frappe.db.get_value("WhatsApp Message", reply_to, "message_id")
+	if not quoted_message_id:
+		return
+	doc.is_reply = 1
+	doc.reply_to_message_id = quoted_message_id
 
 
 @frappe.whitelist()
@@ -114,7 +217,7 @@ def get_media_gallery(conversation):
 
 
 @frappe.whitelist()
-def send_message(conversation, message):
+def send_message(conversation, message, reply_to=None):
 	conv = frappe.get_doc("WhatsApp Conversation", conversation)
 
 	doc = frappe.new_doc("WhatsApp Message")
@@ -124,13 +227,14 @@ def send_message(conversation, message):
 	doc.message = message
 	doc.reference_doctype = "WhatsApp Conversation"
 	doc.reference_name = conv.name
+	_apply_reply(doc, reply_to)
 	doc.insert()  # frappe_whatsapp's before_insert triggers the actual send via send_outgoing()
 
 	return doc.name
 
 
 @frappe.whitelist()
-def send_audio_message(conversation, file_url):
+def send_audio_message(conversation, file_url, reply_to=None):
 	"""Operator-recorded voice note. Unlike send_message, this doesn't send
 	synchronously — the uploaded file (file_url) is the browser's raw
 	WebM/Opus recording, which needs a WebM->OGG/Opus conversion (via ffmpeg)
@@ -144,11 +248,12 @@ def send_audio_message(conversation, file_url):
 		queue="short",
 		conversation=conversation,
 		file_url=file_url,
+		reply_to=reply_to,
 	)
 
 
 @frappe.whitelist()
-def send_media_message(conversation, file_url, content_type, caption=None):
+def send_media_message(conversation, file_url, content_type, caption=None, reply_to=None):
 	"""Operator-attached image, video, or document. Unlike send_audio_message, no
 	conversion is needed — Meta accepts these formats directly — so this sends
 	synchronously through the same frappe_whatsapp path as send_message (which
@@ -173,7 +278,50 @@ def send_media_message(conversation, file_url, content_type, caption=None):
 	doc.message = caption
 	doc.reference_doctype = "WhatsApp Conversation"
 	doc.reference_name = conv.name
+	_apply_reply(doc, reply_to)
 	doc.insert()  # frappe_whatsapp's before_insert triggers the actual send via send_outgoing()
+
+	return doc.name
+
+
+@frappe.whitelist()
+def send_reaction(conversation, message, emoji):
+	"""Toggle the operator's reaction on `message` (a WhatsApp Message docname):
+	sends `emoji`, or an empty emoji -- Meta's own "remove reaction" signal -- if
+	re-sending the one already active, matching WhatsApp's own tap-to-toggle UX.
+	frappe_whatsapp's send_outgoing() already has a content_type == "reaction"
+	branch (`data["reaction"] = {"message_id": self.reply_to_message_id, "emoji":
+	self.message}`) -- this only drives fields it already reads, no vendored-code
+	or schema change needed. See client/conversation.py's early-return for
+	"reaction" and _attach_reactions above for how it's kept out of the chat-list
+	preview and rendered as a badge instead of its own bubble.
+	"""
+	conv = frappe.get_doc("WhatsApp Conversation", conversation)
+	target_wamid = frappe.db.get_value("WhatsApp Message", message, "message_id")
+	if not target_wamid:
+		frappe.throw(_("Mensagem original ainda não confirmada pela Meta."))
+
+	current_emoji = frappe.db.get_value(
+		"WhatsApp Message",
+		{
+			"reference_name": conversation,
+			"type": "Outgoing",
+			"content_type": "reaction",
+			"reply_to_message_id": target_wamid,
+		},
+		"message",
+		order_by="creation desc",
+	)
+
+	doc = frappe.new_doc("WhatsApp Message")
+	doc.type = "Outgoing"
+	doc.content_type = "reaction"
+	doc.to = conv.wa_id
+	doc.message = "" if current_emoji == emoji else emoji
+	doc.reply_to_message_id = target_wamid
+	doc.reference_doctype = "WhatsApp Conversation"
+	doc.reference_name = conv.name
+	doc.insert()
 
 	return doc.name
 

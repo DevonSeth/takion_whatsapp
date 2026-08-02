@@ -47,6 +47,7 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 	constructor(page) {
 		this.page = page;
 		this.current_conversation = null;
+		this.reply_to = null;
 		this.filters = { status: [], tag: '', assigned_to: '', unread_only: false };
 		this.is_system_manager = frappe.user.has_role('System Manager');
 
@@ -139,6 +140,9 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 			<symbol id="wa-i-file" viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 3 14 8 19 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/></symbol>
 			<symbol id="wa-i-flask" viewBox="0 0 24 24"><path d="M9 2v6.5L4.2 17a2 2 0 0 0 1.8 3h12a2 2 0 0 0 1.8-3L15 8.5V2"/><line x1="7" y1="2" x2="17" y2="2"/><line x1="6" y1="15" x2="18" y2="15"/></symbol>
 			<symbol id="wa-i-refresh" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></symbol>
+			<symbol id="wa-i-reply" viewBox="0 0 24 24"><polyline points="9 17 4 12 9 7"/><path d="M4 12h11a5 5 0 0 1 5 5v2"/></symbol>
+			<symbol id="wa-i-smile-plus" viewBox="0 0 24 24"><circle cx="10" cy="12" r="7"/><path d="M7 13.5s1 1.7 3 1.7 3-1.7 3-1.7"/><line x1="7.5" y1="9.5" x2="7.51" y2="9.5"/><line x1="12.5" y1="9.5" x2="12.51" y2="9.5"/><line x1="19" y1="3" x2="19" y2="9"/><line x1="16" y1="6" x2="22" y2="6"/></symbol>
+			<symbol id="wa-i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></symbol>
 		</defs></svg>`).appendTo('body');
 	}
 
@@ -294,6 +298,84 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 			.wa-audio-play .wa-icon { width: 13px; height: 13px; }
 			.wa-audio-wave { flex: 1; height: 24px; }
 			.wa-audio-duration { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
+			/* Hover actions (responder/reagir) -- shown next to the bubble on hover,
+			   mirroring WhatsApp Web's own hover chevron menu, but as two plain
+			   always-legible icons rather than a nested menu (only 2 actions so far). */
+			.wa-bubble-row { position: relative; }
+			.wa-bubble-hover-actions {
+				display: none; align-items: center; gap: 2px; align-self: center;
+				margin: 0 4px;
+			}
+			.wa-bubble-row:hover .wa-bubble-hover-actions { display: flex; }
+			.wa-bubble-hover-actions button {
+				width: 26px; height: 26px; padding: 0; border: none; background: transparent;
+				border-radius: 50%; display: flex; align-items: center; justify-content: center;
+				color: var(--text-muted); cursor: pointer;
+			}
+			.wa-bubble-hover-actions button:hover { background: var(--fg-hover-color); color: var(--text-color); }
+			.wa-bubble-hover-actions .wa-icon { width: 14px; height: 14px; }
+			/* Quoted-message strip inside a reply bubble, and the equivalent strip
+			   above the compose box while a reply target is selected -- same visual
+			   language (colored left bar + muted sender/snippet), matching WhatsApp's
+			   own quote rendering. */
+			.wa-bubble-quote, .wa-reply-preview-row {
+				border-left: 3px solid var(--tmr-accent, #2E5EAA); background: var(--fg-hover-color);
+				border-radius: 4px; padding: 4px 8px; font-size: 12px; margin-bottom: 4px;
+				cursor: pointer; overflow: hidden;
+			}
+			.wa-bubble-quote-sender { font-weight: 600; color: var(--tmr-accent, #2E5EAA); }
+			.wa-bubble-quote-text { color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+			.wa-reply-preview-row { display: none; margin: 0 0 8px 0; cursor: default; position: relative; }
+			.wa-reply-preview-row.active { display: block; }
+			.wa-reply-preview-cancel {
+				position: absolute; top: 4px; right: 4px; width: 20px; height: 20px; padding: 0;
+				border: none; background: transparent; border-radius: 50%; display: flex;
+				align-items: center; justify-content: center; color: var(--text-muted); cursor: pointer;
+			}
+			.wa-reply-preview-cancel:hover { background: var(--fg-hover-color); }
+			.wa-reply-preview-cancel .wa-icon { width: 12px; height: 12px; }
+			/* Reaction badge -- a small pill overlapping the bubble's bottom corner,
+			   matching WhatsApp's own reaction placement, not a separate chat bubble
+			   (see client/inbox.py::_attach_reactions for why reactions are excluded
+			   from the normal message flow entirely). */
+			.wa-bubble { position: relative; }
+			.wa-bubble-reactions {
+				position: absolute; bottom: -10px; right: 6px; display: flex; gap: 2px;
+			}
+			.wa-bubble-row.out .wa-bubble-reactions { right: auto; left: 6px; }
+			.wa-bubble-reaction {
+				background: var(--card-bg, #fff); border: 1px solid var(--border-color);
+				border-radius: 10px; padding: 1px 5px; font-size: 12px; box-shadow: 0 1px 1px rgba(0,0,0,.08);
+			}
+			.wa-reaction-picker {
+				display: none; position: absolute; bottom: 100%; margin-bottom: 4px; z-index: 5;
+				background: var(--card-bg, #fff); border: 1px solid var(--border-color);
+				border-radius: 20px; padding: 4px 6px; box-shadow: 0 2px 8px rgba(0,0,0,.15);
+				gap: 2px;
+			}
+			.wa-bubble-row.out .wa-reaction-picker { right: 0; }
+			.wa-reaction-picker.open { display: flex; }
+			.wa-reaction-picker-emoji {
+				width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
+				font-size: 17px; border-radius: 50%; cursor: pointer; line-height: 1;
+			}
+			.wa-reaction-picker-emoji:hover { background: var(--fg-hover-color); transform: scale(1.15); }
+			.wa-reaction-picker-emoji.active { background: var(--tmr-active-bg, #E7EEFA); }
+			/* Document card ("Abrir"/"Salvar como..."), matching WhatsApp Web's own
+			   document bubble layout -- name+meta row, divider, two-action footer. */
+			.wa-bubble-document { min-width: 220px; }
+			.wa-bubble-document-row { display: flex; align-items: center; gap: 8px; }
+			.wa-bubble-document-row .wa-icon { width: 22px; height: 22px; flex-shrink: 0; color: var(--text-muted); }
+			.wa-bubble-document-info { min-width: 0; }
+			.wa-bubble-document-name { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+			.wa-bubble-document-meta { font-size: 11px; color: var(--text-muted); }
+			.wa-bubble-document-actions {
+				display: flex; margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border-color);
+			}
+			.wa-bubble-document-actions a {
+				flex: 1; text-align: center; font-size: 13px; font-weight: 600;
+				color: var(--tmr-accent, #2E5EAA); padding: 4px 0;
+			}
 			.wa-thread-compose { padding: 10px; border-top: 1px solid var(--border-color); background: var(--card-bg, #fff); }
 			.wa-compose-row { display: flex; align-items: center; gap: 8px; }
 			/* Frappe's default textarea.form-control ships a fixed height:120px (meant
@@ -571,6 +653,11 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 					</div>
 					<div class="wa-thread-messages"></div>
 					<div class="wa-thread-compose" style="display:none;">
+						<div class="wa-reply-preview-row">
+							<div class="wa-bubble-quote-sender"></div>
+							<div class="wa-bubble-quote-text"></div>
+							<button class="wa-reply-preview-cancel" title="${__('Cancelar resposta')}">${this.icon('x')}</button>
+						</div>
 						<div class="wa-compose-row wa-compose-text-row">
 							<div class="wa-emoji-picker-wrap">
 								<button class="btn btn-default btn-sm wa-compose-emoji" title="Emoji">${this.icon('smile')}</button>
@@ -765,6 +852,41 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 		main.on('input', '.wa-compose-input', (e) => {
 			this.update_compose_buttons();
 			this.autosize_compose_input(e.currentTarget);
+		});
+
+		main.on('click', '.wa-bubble-reply-btn', (e) => {
+			const $row = $(e.currentTarget).closest('.wa-bubble-row');
+			const target = (this.thread_messages || []).find((m) => m.name === $row.data('message'));
+			if (target) this.set_reply_target(target);
+		});
+		main.on('click', '.wa-reply-preview-cancel', () => this.clear_reply_target());
+		// Click a rendered reply's quote strip to jump to the original message,
+		// same as WhatsApp's own quoted-reply tap behavior.
+		main.on('click', '.wa-thread-messages .wa-bubble-quote', (e) => {
+			this.flash_highlight_message($(e.currentTarget).data('target'));
+		});
+		main.on('click', '.wa-bubble-react-btn', (e) => {
+			const $picker = $(e.currentTarget).closest('.wa-bubble-row').find('.wa-reaction-picker');
+			this.page.body.find('.wa-reaction-picker.open').not($picker).removeClass('open');
+			$picker.toggleClass('open');
+		});
+		main.on('click', '.wa-reaction-picker-emoji', (e) => {
+			const $row = $(e.currentTarget).closest('.wa-bubble-row');
+			const emoji = $(e.currentTarget).data('emoji');
+			$row.find('.wa-reaction-picker').removeClass('open');
+			frappe.call({
+				method: 'takion_whatsapp.client.inbox.send_reaction',
+				args: { conversation: this.current_conversation, message: $row.data('message'), emoji },
+			}).then(() => this.load_thread(this.current_conversation));
+		});
+		// Closes an open reaction picker on any outside click, same as the emoji/
+		// attach popovers already do -- but not when the click is the react
+		// button itself (that toggle is handled above and would otherwise
+		// immediately re-close what it just opened).
+		$(document).on('click.wa-reaction-picker', (e) => {
+			if (!$(e.target).closest('.wa-reaction-picker, .wa-bubble-react-btn').length) {
+				this.page.body.find('.wa-reaction-picker.open').removeClass('open');
+			}
 		});
 
 		main.on('click', '.wa-compose-mic', () => this.start_recording());
@@ -1184,6 +1306,7 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 	open_conversation(name, jump_to_message) {
 		this.abort_compose_recording();
 		this.discard_media();
+		this.clear_reply_target();
 		this.current_conversation = name;
 		// Reset eagerly (not just after load_contact_panel resolves) so a stray
 		// render_message() firing mid-switch (e.g. a fast realtime update) never
@@ -1431,23 +1554,75 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 		const sender = (!out && this.is_group_conversation)
 			? `<div class="wa-bubble-sender">${frappe.utils.escape_html(msg.profile_name || msg.from || '')}</div>`
 			: '';
+		const quote = this.render_quote(msg.reply_preview);
 		const body = msg.content_type === 'audio'
 			? this.render_audio_bubble(msg)
 			: this.render_generic_bubble(msg);
+		const reactions = this.render_reactions(msg.reactions);
+		const hover_actions = `
+			<div class="wa-bubble-hover-actions">
+				<button class="wa-bubble-reply-btn" title="${__('Responder')}">${this.icon('reply')}</button>
+				<button class="wa-bubble-react-btn" title="${__('Reagir')}">${this.icon('smile-plus')}</button>
+			</div>
+		`;
 
 		// Stickers render without the chat-bubble background/shadow, same as
 		// WhatsApp's own UI -- everything else keeps the normal bubble chrome.
 		const bubble_class = msg.content_type === 'sticker' ? 'wa-bubble wa-bubble-sticker-wrap' : 'wa-bubble';
+		const bubble = `
+			<div class="${bubble_class}">
+				${sender}
+				${quote}
+				${body}
+				<div class="wa-bubble-time">${time}${check}</div>
+				${reactions}
+				<div class="wa-reaction-picker">${this.render_reaction_picker_emojis()}</div>
+			</div>
+		`;
 
 		return `
 			<div class="wa-bubble-row ${out ? 'out' : 'in'}" data-message="${frappe.utils.escape_html(msg.name)}">
-				<div class="${bubble_class}">
-					${sender}
-					${body}
-					<div class="wa-bubble-time">${time}${check}</div>
-				</div>
+				${out ? hover_actions + bubble : bubble + hover_actions}
 			</div>
 		`;
+	}
+
+	// WhatsApp's own quote-strip content: sender label only in a group thread
+	// (same reasoning as render_message's own `sender`), a one-line snippet of
+	// the quoted message's text, or a content-type label for anything without
+	// one (media/sticker/location/etc. carry no useful `message` text to show).
+	render_quote(reply_preview) {
+		if (!reply_preview) return '';
+		const CONTENT_TYPE_LABELS = {
+			image: __('Foto'), video: __('Vídeo'), audio: __('Áudio'), document: __('Documento'),
+			sticker: __('Figurinha'), location: __('Localização'),
+		};
+		const sender = this.is_group_conversation
+			? (reply_preview.type === 'Outgoing' ? __('Você') : (reply_preview.profile_name || ''))
+			: '';
+		const snippet = reply_preview.message || CONTENT_TYPE_LABELS[reply_preview.content_type] || '';
+		return `
+			<div class="wa-bubble-quote" data-target="${frappe.utils.escape_html(reply_preview.name)}">
+				${sender ? `<div class="wa-bubble-quote-sender">${frappe.utils.escape_html(sender)}</div>` : ''}
+				<div class="wa-bubble-quote-text">${frappe.utils.escape_html(snippet)}</div>
+			</div>
+		`;
+	}
+
+	render_reactions(reactions) {
+		if (!reactions || !reactions.length) return '';
+		return `
+			<div class="wa-bubble-reactions">
+				${reactions.map((r) => `<span class="wa-bubble-reaction">${frappe.utils.escape_html(r.emoji)}</span>`).join('')}
+			</div>
+		`;
+	}
+
+	// Same 6-emoji quick-react set WhatsApp's own hover picker opens with.
+	render_reaction_picker_emojis() {
+		return ['👍', '❤️', '😂', '😮', '😢', '🙏']
+			.map((e) => `<span class="wa-reaction-picker-emoji" data-emoji="${e}">${e}</span>`)
+			.join('');
 	}
 
 	// Click-to-zoom on any image bubble — a fullscreen overlay with the same
@@ -1479,7 +1654,7 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 			? `<div class="wa-bubble-text" style="margin-top:4px;">${
 				this.thread_search_query
 					? this.highlight_text(msg.message, this.thread_search_query)
-					: frappe.utils.escape_html(msg.message)
+					: this.linkify_text(msg.message)
 			}</div>`
 			: '';
 		if (msg.content_type === 'sticker' && msg.attach) {
@@ -1491,15 +1666,65 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 			return `<img class="wa-bubble-img" src="${frappe.utils.escape_html(msg.attach)}" style="max-width:220px;border-radius:4px;">${caption}`;
 		}
 		if (msg.content_type === 'video' && msg.attach) {
-			return `<video src="${frappe.utils.escape_html(msg.attach)}" controls style="max-width:220px;border-radius:4px;"></video>${caption}`;
+			// A GIF sent from WhatsApp's own app always arrives as a plain video
+			// message (see client/video.py::detect_gif_video's docstring) -- render
+			// it the way WhatsApp itself does: autoplaying, looping, muted, no
+			// player chrome, instead of a normal video-with-controls bubble.
+			const gif_attrs = 'autoplay loop muted playsinline';
+			const attrs = msg.is_gif ? gif_attrs : 'controls';
+			return `<video src="${frappe.utils.escape_html(msg.attach)}" ${attrs} style="max-width:220px;border-radius:4px;"></video>${caption}`;
 		}
 		if (msg.attach && msg.content_type === 'document') {
-			return `<a href="${frappe.utils.escape_html(msg.attach)}" target="_blank">${this.icon('file')} ${frappe.utils.escape_html(msg.attach.split('/').pop())}</a>`;
+			return this.render_document_bubble(msg) + caption;
 		}
 		const html = this.thread_search_query
 			? this.highlight_text(msg.message || '', this.thread_search_query)
-			: frappe.utils.escape_html(msg.message || '');
+			: this.linkify_text(msg.message || '');
 		return `<div class="wa-bubble-text">${html}</div>`;
+	}
+
+	// Turns a bare URL into a clickable link -- needed for content_type ==
+	// "location" (client/location.py formats the message as name/address/a
+	// Google Maps URL, see its docstring) but applies to any message text with
+	// a URL in it, same regex frappe_whatsapp's own client/inbox.py::URL_PATTERN
+	// uses server-side for the contact panel's "Links" tab. Escapes first, then
+	// re-matches the URL in the escaped string -- safe, since a URL contains no
+	// characters escape_html would alter other than a literal "&" (correctly
+	// re-encoded as "&amp;" either way).
+	linkify_text(text) {
+		const escaped = frappe.utils.escape_html(text);
+		return escaped.replace(/(https?:\/\/\S+)/g, (url) => `<a href="${url}" target="_blank" rel="noopener">${url}</a>`);
+	}
+
+	// "Abrir"/"Salvar como..." card, matching WhatsApp Web's own document bubble
+	// (see the screenshot that motivated this) rather than a bare filename link.
+	// `download` works here because Takion's own file URLs are same-origin.
+	render_document_bubble(msg) {
+		const filename = decodeURIComponent(msg.attach.split('/').pop());
+		const ext = (filename.split('.').pop() || '').toUpperCase();
+		const size = msg.file_size ? this.format_file_size(msg.file_size) : '';
+		const url = frappe.utils.escape_html(msg.attach);
+		return `
+			<div class="wa-bubble-document">
+				<div class="wa-bubble-document-row">
+					${this.icon('file')}
+					<div class="wa-bubble-document-info">
+						<div class="wa-bubble-document-name">${frappe.utils.escape_html(filename)}</div>
+						<div class="wa-bubble-document-meta">${ext}${size ? ' • ' + size : ''}</div>
+					</div>
+				</div>
+				<div class="wa-bubble-document-actions">
+					<a href="${url}" target="_blank">${__('Abrir')}</a>
+					<a href="${url}" download>${__('Salvar como...')}</a>
+				</div>
+			</div>
+		`;
+	}
+
+	format_file_size(bytes) {
+		if (bytes < 1024) return `${bytes} B`;
+		if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+		return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 	}
 
 	render_audio_bubble(msg) {
@@ -1522,16 +1747,46 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 		return `${m}:${String(s).padStart(2, '0')}`;
 	}
 
+	// Selects `msg` as the reply target: fills the quote strip above the compose
+	// box (its sender/text divs are fixed markup, see the wa-thread-compose HTML)
+	// and focuses the input, matching WhatsApp's own tap-to-reply UX. Any of the
+	// 3 send paths (text/media/audio) picks this up and clears it once sent.
+	// Always shows a sender label here (unlike render_quote's rendered-bubble
+	// version, which only labels it in a group thread) -- mid-compose, "Você"
+	// vs. the contact's name is useful context even in a plain 1:1 thread.
+	set_reply_target(msg) {
+		this.reply_to = msg;
+		const CONTENT_TYPE_LABELS = {
+			image: __('Foto'), video: __('Vídeo'), audio: __('Áudio'), document: __('Documento'),
+			sticker: __('Figurinha'), location: __('Localização'),
+		};
+		const sender = msg.type === 'Outgoing' ? __('Você') : (msg.profile_name || msg.from || '');
+		const snippet = msg.message || CONTENT_TYPE_LABELS[msg.content_type] || '';
+
+		const $row = this.page.body.find('.wa-reply-preview-row');
+		$row.find('.wa-bubble-quote-sender').text(sender);
+		$row.find('.wa-bubble-quote-text').text(snippet);
+		$row.addClass('active');
+		this.page.body.find('.wa-compose-input').focus();
+	}
+
+	clear_reply_target() {
+		this.reply_to = null;
+		this.page.body.find('.wa-reply-preview-row').removeClass('active');
+	}
+
 	send_message() {
 		const $input = this.page.body.find('.wa-compose-input');
 		const text = $input.val().trim();
 		if (!text || !this.current_conversation) return;
 
+		const reply_to = this.reply_to && this.reply_to.name;
 		$input.val('').prop('disabled', true);
 		this.autosize_compose_input();
+		this.clear_reply_target();
 		frappe.call({
 			method: 'takion_whatsapp.client.inbox.send_message',
-			args: { conversation: this.current_conversation, message: text },
+			args: { conversation: this.current_conversation, message: text, reply_to },
 		}).then(() => {
 			$input.prop('disabled', false).focus();
 			this.update_compose_buttons();
@@ -1826,8 +2081,10 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 		if (!this.recorded_blob || !this.current_conversation) return;
 		const blob = this.recorded_blob;
 		const conversation = this.current_conversation;
+		const reply_to = this.reply_to && this.reply_to.name;
 
 		this.discard_recording();
+		this.clear_reply_target();
 		this.render_optimistic_audio_bubble();
 
 		const form_data = new FormData();
@@ -1847,7 +2104,7 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 				if (!file_url) throw new Error('upload failed');
 				return frappe.call({
 					method: 'takion_whatsapp.client.inbox.send_audio_message',
-					args: { conversation, file_url },
+					args: { conversation, file_url, reply_to },
 				});
 			})
 			.catch(() => {
@@ -1941,8 +2198,10 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 		const kind = this.media_kind;
 		const caption = this.page.body.find('.wa-media-caption').val().trim();
 		const conversation = this.current_conversation;
+		const reply_to = this.reply_to && this.reply_to.name;
 
 		this.discard_media();
+		this.clear_reply_target();
 		this.render_optimistic_media_bubble(kind);
 
 		const form_data = new FormData();
@@ -1965,10 +2224,10 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 				// does (server's send_media_message only accepts image/video/document)
 				// -- no caption param either way, same as a recording.
 				return kind === 'audio'
-					? frappe.call({ method: 'takion_whatsapp.client.inbox.send_audio_message', args: { conversation, file_url } })
+					? frappe.call({ method: 'takion_whatsapp.client.inbox.send_audio_message', args: { conversation, file_url, reply_to } })
 					: frappe.call({
 						method: 'takion_whatsapp.client.inbox.send_media_message',
-						args: { conversation, file_url, content_type: kind, caption },
+						args: { conversation, file_url, content_type: kind, caption, reply_to },
 					});
 			})
 			.then(() => this.load_thread(conversation))

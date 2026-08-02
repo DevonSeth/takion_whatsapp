@@ -29,7 +29,7 @@ from frappe.utils.file_manager import save_file
 FFMPEG_AUDIO_ARGS = ["-c:a", "libopus", "-b:a", "24k", "-ac", "1", "-ar", "16000"]
 
 
-def convert_and_send(conversation, file_url):
+def convert_and_send(conversation, file_url, reply_to=None):
 	webm_file = frappe.get_doc("File", {"file_url": file_url})
 	webm_path = webm_file.get_full_path()
 	ogg_path = os.path.splitext(webm_path)[0] + ".ogg"
@@ -70,6 +70,11 @@ def convert_and_send(conversation, file_url):
 		doc.attach = ogg_file.file_url
 		doc.reference_doctype = "WhatsApp Conversation"
 		doc.reference_name = conv.name
+		# Local import: client/inbox.py doesn't import this module, so no cycle --
+		# reuses the exact same reply-attaching logic send_message/send_media_message
+		# use rather than duplicating it here.
+		from takion_whatsapp.client.inbox import _apply_reply
+		_apply_reply(doc, reply_to)
 		doc.insert(ignore_permissions=True)
 		# before_insert (frappe_whatsapp) sends via Meta; after_insert (hooks.py's
 		# doc_events) links the conversation and publishes whatsapp_inbox_update —

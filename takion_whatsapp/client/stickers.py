@@ -34,7 +34,10 @@ class WhatsAppMessageStickerMixin(Document):
 	"""
 	def notify(self, data):
 		if self.content_type == "sticker" and self.attach:
-			link = self.attach if self.attach.startswith("http") else frappe.utils.get_url() + "/" + self.attach
+			# self.attach already starts with "/" (Frappe file_url convention) --
+			# see client/media_link_fix.py's docstring for the same bug this
+			# would otherwise reproduce (a double slash right after the host).
+			link = self.attach if self.attach.startswith("http") else frappe.utils.get_url() + self.attach
 			data["sticker"] = {"link": link}
 		super().notify(data)
 

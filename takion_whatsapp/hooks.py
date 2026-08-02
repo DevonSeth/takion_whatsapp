@@ -154,8 +154,12 @@ doc_events = {
 		# the WhatsApp Conversation already existing, which
 		# link_message_to_conversation is what creates/resolves it. See
 		# client/attribution.py's and client/optout.py's module docstrings.
+		# fix_incoming_location runs first so a location message's corrected
+		# text (see client/location.py) is what link_message_to_conversation
+		# reads for the conversation's last_message_preview.
 		"after_insert": [
 			"takion_whatsapp.client.pricing.capture_pricing",
+			"takion_whatsapp.client.location.fix_incoming_location",
 			"takion_whatsapp.client.conversation.link_message_to_conversation",
 			"takion_whatsapp.client.optout.detect_optout",
 			"takion_whatsapp.client.attribution.capture_referral",
@@ -163,8 +167,23 @@ doc_events = {
 			# own webhook handler never does for content_type == "sticker" -- no
 			# ordering dependency on the other three above, appended last.
 			"takion_whatsapp.client.stickers.fetch_incoming_sticker",
+			# GIF detection (2026-08-02): covers the OUTGOING case here, where
+			# attach is already set before insert -- see on_update below for why
+			# INCOMING also needs it there.
+			"takion_whatsapp.client.video.detect_gif_video",
 		],
-		"on_update": "takion_whatsapp.client.pricing.capture_pricing",
+		# capture_pricing: Meta often attaches pricing to a later status webhook,
+		# not the original message webhook (see client/pricing.py).
+		# detect_gif_video: frappe_whatsapp's own webhook.py sets an INCOMING
+		# video's `attach` via a SEPARATE save() after the initial insert (the
+		# file is downloaded, then attached) -- after_insert above only ever
+		# sees attach populated for the OUTGOING case, so incoming needs this
+		# on_update leg too. Harmless to re-run on a later, unrelated on_update
+		# (e.g. a status-webhook resave) -- just recomputes the same value.
+		"on_update": [
+			"takion_whatsapp.client.pricing.capture_pricing",
+			"takion_whatsapp.client.video.detect_gif_video",
+		],
 	},
 	# Entrega 7 ("Contexto & Funil"): reverse half of the Conversation<->Funnel
 	# join -- a Lead created outside WhatsApp that carries a whatsapp_no still
@@ -226,7 +245,7 @@ fixtures = [
 	# "WhatsApp Message" -- actually created idempotently by after_migrate below
 	# (create_custom_fields), this entry only exports the resulting records so a
 	# completely fresh install (before any migrate has run) still reproduces them.
-	{"dt": "Custom Field", "filters": [["dt", "=", "WhatsApp Message"], ["fieldname", "in", ["origin_doctype", "origin_name"]]]},
+	{"dt": "Custom Field", "filters": [["dt", "=", "WhatsApp Message"], ["fieldname", "in", ["origin_doctype", "origin_name", "is_gif"]]]},
 	# Entrega 10 ("Transmissão Segura"): same idempotent-creation/fixture-export
 	# split as Entrega 8, above, for the three other third-party doctypes this
 	# Entrega adds Custom Fields to.
@@ -316,7 +335,16 @@ scheduler_events = {
 # file as a generic audio-file attachment, not the native voice-note bubble
 # (see client/audio.py's mixin docstring).
 #
-# All three mixins on WhatsApp Message override notify() and call
+# WhatsAppMessageMediaLinkFixMixin (2026-08-02): frappe_whatsapp's own
+# send_outgoing() builds the outgoing `link` as get_url() + "/" + self.attach,
+# but self.attach already starts with "/" -- always a double slash right
+# after the host for image/video/document/audio. Confirmed live (Cloudflare/
+# nginx currently tolerate it, but it's still a malformed URL with no
+# guarantee Meta's own fetcher would). Placed last so it normalizes whatever
+# link any earlier mixin above it in the chain already set, not just
+# frappe_whatsapp's own -- see client/media_link_fix.py's docstring.
+#
+# All mixins on WhatsApp Message override notify() and call
 # super().notify(data), so frappe's extend_doctype_class chains them (see
 # frappe/model/base_document.py::_get_extended_class) regardless of list
 # order -- each just adds its own key and delegates down to the next one,
@@ -329,6 +357,7 @@ extend_doctype_class = {
 		"takion_whatsapp.client.groups.WhatsAppMessageGroupSendMixin",
 		"takion_whatsapp.client.stickers.WhatsAppMessageStickerMixin",
 		"takion_whatsapp.client.audio.WhatsAppMessageVoiceNoteMixin",
+		"takion_whatsapp.client.media_link_fix.WhatsAppMessageMediaLinkFixMixin",
 	],
 }
 

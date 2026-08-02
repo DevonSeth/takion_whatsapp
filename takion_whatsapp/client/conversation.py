@@ -156,6 +156,16 @@ def _upsert_group_participant(conversation, doc):
 
 
 def _update_conversation_after_message(conversation, message):
+	if message.content_type == "reaction":
+		# A reaction (Meta's own emoji-react-to-a-message type, message = the
+		# emoji or "" to remove one) doesn't change the conversation's last-
+		# message preview, unread state, or SLA clock -- same as WhatsApp's own
+		# UI, where reacting never touches the chat list. Still publish so an
+		# already-open thread re-renders with the new/removed reaction badge
+		# (see client/inbox.py::_attach_reactions).
+		frappe.publish_realtime("whatsapp_inbox_update", {"conversation": conversation.name}, after_commit=True)
+		return
+
 	direction = "Outbound" if message.type == "Outgoing" else "Inbound"
 
 	conversation.last_message_at = frappe.utils.now_datetime()
