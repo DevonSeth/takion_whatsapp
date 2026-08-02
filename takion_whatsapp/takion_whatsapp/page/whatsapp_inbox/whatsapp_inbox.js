@@ -79,6 +79,13 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 		this.thread_search_index = -1;
 		this.pending_jump_message = null;
 
+		// This page never uses page actions and its own breadcrumb is already
+		// hidden globally (see takion_theme/public/js/topbar.js, which mirrors
+		// it into the top bar instead) -- the native .page-head row would
+		// otherwise still reserve its fixed height for nothing, leaving a
+		// blank strip above the inbox's own 3-pane layout.
+		this.page.wrapper.find('.page-head').hide();
+
 		this.inject_icons();
 		this.inject_styles();
 		this.make_layout();
@@ -220,7 +227,7 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 			.wa-conversations-filters select, .wa-conversations-filters input { font-size: 12px; padding: 2px 4px; }
 			.wa-unread-toggle { display: inline-flex; align-items: center; gap: 5px; transition: background 120ms ease, border-color 120ms ease, color 120ms ease; }
 			.wa-unread-toggle .wa-unread-toggle-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-			.wa-unread-toggle.active { background: var(--blue-100, #d3e8fb); border-color: var(--blue-500, #2490ef); color: var(--blue-700, #1a5490); }
+			.wa-unread-toggle.active { background: var(--tmr-active-bg, #E7EEFA); border-color: var(--tmr-accent, #2E5EAA); color: var(--tmr-accent, #2E5EAA); }
 			.wa-conversations-list { flex: 1; overflow-y: auto; }
 			.wa-conversation-item { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-bottom: 1px solid var(--border-color); cursor: pointer; transition: background 120ms ease; }
 			.wa-conversation-item:hover { background: var(--fg-hover-color); }
@@ -238,7 +245,7 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 			   neutral colors (see the standing no-WhatsApp-colors rule). */
 			.wa-conversation-item:not(.unread) .wa-conversation-title,
 			.wa-conversation-item:not(.unread) .wa-conversation-preview { font-weight: 400; color: var(--text-muted); }
-			.wa-unread-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--blue-500, #2490ef); margin-left: 6px; flex-shrink: 0; }
+			.wa-unread-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--tmr-accent, #2E5EAA); margin-left: 6px; flex-shrink: 0; }
 			.wa-conversation-time { font-weight: 400; font-size: 11px; color: var(--text-muted); }
 			.wa-conversation-preview { font-size: 12px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 			.wa-conversation-meta { margin-top: 4px; display: flex; gap: 4px; align-items: center; }
@@ -260,18 +267,18 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 			.wa-thread-messages { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 6px; }
 			.wa-bubble-row { display: flex; }
 			.wa-bubble-row.out { justify-content: flex-end; }
-			/* Bubble/checkmark colors below are placeholders only — final palette will be
-			   set later during the Takion frontend refinement pass, not WhatsApp's own. */
+			/* Accent tokens (--tmr-accent/--tmr-active-bg) come from the module rail's
+			   own palette (module_rail.js) -- reused here so the whole WhatsApp module
+			   reads as one system instead of two independently-tuned blues. Same "no
+			   WhatsApp brand colors" rule as ever: this is Takion's own accent, not Meta's. */
 			.wa-bubble { max-width: 65%; padding: 6px 9px; border-radius: 8px; background: var(--card-bg, #fff); box-shadow: 0 1px 1px rgba(0,0,0,.08); }
-			.wa-bubble-row.out .wa-bubble { background: var(--gray-100, #eee); }
+			.wa-bubble-row.out .wa-bubble { background: var(--tmr-active-bg, #E7EEFA); }
 			.wa-bubble-text { white-space: pre-wrap; word-break: break-word; font-size: 13px; }
 			.wa-bubble-time { text-align: right; font-size: 10px; color: var(--text-muted); margin-top: 2px; }
 			.wa-bubble-time .wa-check { margin-left: 3px; display: inline-flex; }
 			.wa-bubble-time .wa-check .wa-icon { width: 12px; height: 12px; }
-			/* Placeholder color only, same "no WhatsApp brand colors" rule as the rest
-			   of this file -- just needs to read as "not the message body" at a glance. */
-			.wa-bubble-sender { font-size: 11px; font-weight: 600; color: var(--blue-500, #2490ef); margin-bottom: 2px; }
-			.wa-check-read { color: var(--blue-500, #2490ef); }
+			.wa-bubble-sender { font-size: 11px; font-weight: 600; color: var(--tmr-accent, #2E5EAA); margin-bottom: 2px; }
+			.wa-check-read { color: var(--tmr-accent, #2E5EAA); }
 			.wa-audio-bubble { display: flex; align-items: center; gap: 8px; min-width: 220px; }
 			.wa-audio-play { width: 30px; height: 30px; border-radius: 50%; background: var(--gray-500); color: #fff; border: none; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
 			.wa-audio-play .wa-icon { width: 13px; height: 13px; }

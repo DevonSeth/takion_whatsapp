@@ -86,6 +86,36 @@
     "report_ref_doctype": null
    },
    {
+    "type": "Link",
+    "label": "Funil de Leads",
+    "icon": null,
+    "hidden": 0,
+    "link_type": "DocType",
+    "link_to": "Lead",
+    "dependencies": null,
+    "only_for": null,
+    "onboard": 0,
+    "is_query_report": 0,
+    "link_count": 0,
+    "description": null,
+    "report_ref_doctype": null
+   },
+   {
+    "type": "Link",
+    "label": "Funil de Oportunidades",
+    "icon": null,
+    "hidden": 0,
+    "link_type": "DocType",
+    "link_to": "Opportunity",
+    "dependencies": null,
+    "only_for": null,
+    "onboard": 0,
+    "is_query_report": 0,
+    "link_count": 0,
+    "description": null,
+    "report_ref_doctype": null
+   },
+   {
     "type": "Card Break",
     "label": "Configuração",
     "icon": null,
