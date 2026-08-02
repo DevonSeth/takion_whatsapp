@@ -185,6 +185,16 @@ takion_whatsapp.WhatsAppInbox = class WhatsAppInbox {
 			@media (prefers-reduced-motion: reduce) {
 				.whatsapp-inbox, .whatsapp-inbox * { transition: none !important; animation: none !important; }
 			}
+			/* Frappe's native .main-section also manages its own scroll
+			   (overflow-y: auto in main.scss) -- if resize_layout()'s JS-measured
+			   height for .whatsapp-inbox is ever a pixel or two off from that
+			   container's actual available space, .main-section grows its own
+			   second, OUTER scrollbar on top of this page's real internal ones
+			   (conversations list, thread messages), and scrolling it drags the
+			   whole 3-pane layout as one block -- compose bar included. This
+			   page owns 100% of its own scrolling already, so :has() turns the
+			   outer one off entirely whenever this page's markup is present. */
+			.main-section:has(.whatsapp-inbox) { overflow: hidden !important; }
 			.whatsapp-inbox { display: flex; height: calc(100vh - 180px); border: 1px solid var(--border-color); border-radius: var(--border-radius); overflow: hidden; }
 			.wa-conversations { width: 300px; border-right: 1px solid var(--border-color); display: flex; flex-direction: column; overflow: hidden; }
 			.wa-conversations-actions { padding: 8px; display: flex; gap: 6px; border-bottom: 1px solid var(--border-color); flex-wrap: wrap; }
